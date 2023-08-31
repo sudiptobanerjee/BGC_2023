@@ -1,0 +1,88 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-08-27"
+---
+
+1。 2d plot
+```{r}
+# Plot Cartesian coordinate system and circle.
+plot(NA, xlim=c(-1.5, 1.5), ylim=c(-1.5, 1.5), asp=1, xlab="X", ylab="Y")
+
+theta <- seq(0, 2*pi, by=0.001)
+x <- cos(theta)
+y <- sin(theta)
+
+lines(x, y)
+
+segments(-1, -1, -1, 1, col="red")
+segments(1, -1, 1, 1, col="red")
+segments(-1, 0, 1, 0, col="blue", lty = "dotted")
+segments(0, 1, 0, -1, col="blue", lty = "dotted")
+
+# Random generate a point
+# set.seed(123)
+# theta_point <- runif(1, 0, 2 * pi)
+
+# pi/3 point
+theta_point <- pi/3
+x_point <- cos(theta_point)
+y_point <- sin(theta_point)
+
+# draw all lines.
+segments(x_point, y_point, x_point, 0, col="yellow") 
+segments(x_point, 0, 0, 0, col="yellow")             
+segments(0, 0, x_point, y_point, col="yellow")       
+if (x_point > 0) {
+  arrows(0, y_point, 1, y_point, col="green", angle=30, length=0.1)
+} else {
+  arrows(0, y_point, -1, y_point, col="green", angle=30, length=0.1)
+}
+
+
+```
+
+2. 3d plot
+```{r}
+library(rgl)
+open3d()
+theta <- seq(0, 2*pi, len = 25)
+knot <- cylinder3d(
+      center = cbind(
+        sin(theta) + 2*sin(2*theta), 
+        2*sin(3*theta), 
+        cos(theta) - 2*cos(2*theta)),
+      e1 = cbind(
+        cos(theta) + 4*cos(2*theta), 
+        6*cos(3*theta), 
+        sin(theta) + 4*sin(2*theta)),
+      radius = 0.8, 
+      closed = TRUE)
+                     
+shade3d(addNormals(subdivision3d(knot, depth = 2)), col = "green")  
+```
+
+```{r}
+library(rgl)
+cylinder_sides_only <- function(radius, height, sides = 50, alpha = 0.5) {
+  circle_points <- matrix(c(radius * cos(seq(0, 2 * pi, length = sides)),
+                            radius * sin(seq(0, 2 * pi, length = sides)),
+                            rep(0, sides)), 
+                          ncol = 3)
+  
+  top_circle <- circle_points
+  bottom_circle <- circle_points
+  top_circle[, 3] <- height
+  for(i in 1:(sides-1)) {
+    triangles3d(c(bottom_circle[i, ], bottom_circle[i + 1, ], top_circle[i + 1, ]), col = rgb(1,0,0,alpha))
+    triangles3d(c(bottom_circle[i, ], top_circle[i + 1, ], top_circle[i, ]), col = rgb(1,0,0,alpha))
+  }
+}
+
+
+open3d()
+material3d(alpha = 0.2)
+cylinder_sides_only(1, 3, sides = 1000, alpha = 0.5)
+spheres3d(x = 0, y = 0, z = 1.5, radius = 1,
+          color = "yellow", alpha = 1.0, subdivisions = 100000)
+```
