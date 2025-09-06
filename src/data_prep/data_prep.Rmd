@@ -1,0 +1,47 @@
+---
+title: "Extracting the data you need for plotting on a map"
+output: html_document
+date: "2023-10-02"
+---
+
+1. Required Libraries
+```{r}
+library(sf)
+library(maps)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+```
+
+2. Import variable from external database
+```{r}
+rate_5y <- read.csv("data/age_adjusted.csv")
+```
+
+3. Extract lung cancer data for California and order alphabetically by county names. Ordering the county names alphabetically will align the rates with the counties in the map.
+```{r}
+rate_CA = rate_5y[substr(rate_5y$State_county,1,2) == "CA",]
+rate_lung = rate_CA[rate_CA$Site_recode_ICD_O_3_WHO_2008=="Lung and Bronchus",]
+rate_lung = rate_lung[order(readr::parse_number(as.character(rate_lung$State_county))),]
+```
+
+4. Prepare data for plotting on maps
+```{r}
+ca.county = map("county","california", fill=TRUE, plot=FALSE)
+county.ID <- sapply(strsplit(ca.county$names, ","), function(x) x[2])
+ca.county.sf <- st_as_sf(ca.county)
+ca.county.sf$rate_lung = rate_lung$Age_Adjusted_Rate
+```
+
+5. Produce map of age adjusted cancer incidence rates
+```{r}
+brks_fit_lung = quantile(ca.county.sf$rate_lung, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+color.palette = rev(brewer.pal(5,"RdBu"))
+class(color.palette)
+
+plot(ca.county.sf["rate_lung"], pal = color.palette, breaks = brks_fit_lung, main = "Lung cancer")
+```
+
