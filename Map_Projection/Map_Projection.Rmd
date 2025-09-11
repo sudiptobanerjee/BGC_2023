@@ -1,0 +1,91 @@
+---
+title: "Map Projections"
+output: html_document
+date: "2023-08-23"
+---
+
+```{r}
+library(maps)
+library(mapproj)
+library(ggplot2)
+library(sf)
+```
+
+1. Default world map
+```{r}
+p <- ggplot(map_data("world"),
+            aes(long, lat, group = group)) +
+  geom_polygon(fill = "white", colour = 1) +
+  labs(title = "World Map")
+
+p
+```
+
+2. Default CHINA and U.S. map
+```{r}
+world <- map_data("world")
+china <- subset(world, region == "China")
+usa <- map_data("usa")
+mainland <- subset(usa, !(region %in% c("alaska", "hawaii")))
+
+
+p_china <- ggplot(data = china, aes(long, lat, group = group)) +
+  geom_polygon(fill = "white", colour = "black") +
+  labs(title = "China Map")
+
+p_mainland <- ggplot(data = mainland, aes(x = long, y = lat, group = group)) +
+  geom_polygon(fill = "white", colour = "black") +
+  labs(title = "USA Mainland Map") +
+  theme(legend.position = "none")
+
+p_china
+p_mainland
+```
+
+3. "Mercator" Map Projection.\
+**Advantage**: 1. Directional Accuracy. 2. Straight Rhumb Lines.\
+**Disadvantage**: 1. Area Distortion. 2. Cannot Represent Polar Areas.
+```{r}
+p <- ggplot(map_data("world"),
+            aes(long, lat, group = group)) +
+      geom_polygon(fill = "white", colour = 1)
+
+p + coord_map(xlim = c(-180, 180))
+p + coord_sf() 
+```
+
+4."Orthographic" Map Projection\
+The projection mimics the way distant celestial objects are viewed from a vast distance.
+```{r}
+p <- ggplot(map_data("world"),
+            aes(long, lat, group = group)) +
+      geom_polygon(fill = "white", colour = 1)
+
+p + coord_map("orthographic") 
+```
+
+5."Fish Eye" Map Projection\
+From the center point of the projection, distances are accurately represented. 
+```{r}
+p <- ggplot(map_data("world"),
+            aes(long, lat, group = group)) +
+      geom_polygon(fill = "white", colour = 1)
+
+p + coord_map("fisheye", n = 4)
+```
+
+6."Sinusoidal" Map Projection、
+Areas are represented accurately on the map.
+```{r}
+p <- ggplot(map_data("world"),
+            aes(long, lat, group = group)) +
+      geom_polygon(fill = "white", colour = 1)
+
+p + coord_map("sinusoidal") 
+```
+
+
+
+
+
+

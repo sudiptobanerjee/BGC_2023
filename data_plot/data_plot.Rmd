@@ -1,0 +1,111 @@
+---
+title: "Plotting Data On Maps in R"
+output: html_document
+date: "2023-08-21"
+---
+
+1. Required Libraries
+```{r}
+library(sp)
+library(maps)
+library(mapproj)
+library(maptools)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+```
+
+2. Import map of California with county boundaries
+```{r}
+ca.county = map("county","california", fill=TRUE, plot=FALSE)
+```
+
+3. Import covariates from external data set
+```{r}
+covariates <- read.csv("data/covariates.csv")
+race <- read.csv("data/race.csv")
+sex <- read.csv("data/sex.csv")
+insurance <- read.csv("data/insurance.csv")
+smoking <- read.csv("data/smoking.csv")
+rate_5y <- read.csv("data/SIR_adjusted.csv")[,-1]
+smoking$smoking <- as.numeric(substr(smoking$Cigarette.Smoking.Rate., 1,4))
+```
+
+4. Prepare Data for plotting on maps
+```{r}
+rate_lung = rate_5y %>% filter(Site.code == "Lung and Bronchus")
+rate_esophagus = rate_5y %>% filter(Site.code == "Esophagus")
+rate_larynx = rate_5y %>% filter(Site.code == "Larynx")
+rate_colrect = rate_5y %>% filter(Site.code == "Colon and Rectum")
+
+county.ID <- sapply(strsplit(ca.county$names, ","), function(x) x[2])
+ca.poly = map2SpatialPolygons(ca.county, IDs=county.ID)
+ca.poly$rate_lung = rate_lung$standard_ratio
+ca.poly$rate_esophagus = rate_esophagus$standard_ratio
+ca.poly$rate_larynx = rate_larynx$standard_ratio
+ca.poly$rate_colrect = rate_colrect$standard_ratio
+ca.poly$smoking = smoking$smoking
+
+ca.coords = coordinates(ca.poly)
+```
+
+5. Produce map of cancer indicences and place in "figure directory".
+```{r}
+brks_fit_lung = quantile(ca.poly$rate_lung, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_esophagus = quantile(ca.poly$rate_esophagus, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_larynx = quantile(ca.poly$rate_larynx, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_colrect = quantile(ca.poly$rate_colrect, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+
+color.pallete = rev(brewer.pal(5,"RdBu"))
+class.rate_lung = classIntervals(var=ca.poly$rate_lung, n=5, style="fixed", 
+                                 fixedBreaks=brks_fit_lung, dataPrecision=4)
+class.rate_esophagus = classIntervals(var=ca.poly$rate_esophagus, n=5, style="fixed", 
+                                      fixedBreaks=brks_fit_esophagus, dataPrecision=4)
+class.rate_larynx = classIntervals(var=ca.poly$rate_larynx, n=5, style="fixed", 
+                                   fixedBreaks=brks_fit_larynx, dataPrecision=4)
+class.rate_colrect = classIntervals(var=ca.poly$rate_colrect, n=5, style="fixed", 
+                                    fixedBreaks=brks_fit_colrect, dataPrecision=4)
+color.code.rate_lung = findColours(class.rate_lung, color.pallete)
+color.code.rate_esophagus = findColours(class.rate_esophagus, color.pallete)
+color.code.rate_larynx = findColours(class.rate_larynx, color.pallete)
+color.code.rate_colrect = findColours(class.rate_colrect, color.pallete)
+
+pdf("figure/incidence_poission.pdf", height = 10, width = 12)
+par(mfrow=c(2,2), oma = c(0,0,4,0) + 0.1, mar = c(0,0,1,0) + 0.1)
+
+plot(ca.poly, col = color.code.rate_lung, main = "Lung cancer")
+
+plot(ca.poly, col = color.code.rate_esophagus, main = "Esophageal cancer")
+
+plot(ca.poly, col = color.code.rate_larynx, main = "larynx cancer")
+
+plot(ca.poly, col = color.code.rate_colrect, main = "colorectal cancer")
+leg.txt = c("0-20%", "20%-40%", "40%-60%", "60%-80%", "80%-100%")
+par(fig = c(0, 1, 0, 1), oma = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), new = TRUE)
+plot(0, 0, type = "n", bty = "n", xaxt = "n", yaxt = "n")
+legend("center", legend=leg.txt, xpd = TRUE, cex=1.5, bty="n", horiz = FALSE, 
+       fill = color.pallete)
+
+dev.off()
+```
+
+6. Produce map of smoking rates and place in "figure" directory.
+```{r}
+brks_fit_smoking = quantile(ca.poly$smoking, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+class.rate_smoking = classIntervals(var=ca.poly$smoking, n=7, style="fixed", 
+                                    fixedBreaks=brks_fit_smoking, dataPrecision=4)
+color.code.rate_smoking = findColours(class.rate_smoking, color.pallete)
+
+pdf("figure/smoking.pdf", height = 10, width = 12)
+plot(ca.poly, col = color.code.rate_smoking, main = "smoking")
+leg.txt = c("0-20%", "20%-40%", "40%-60%", "60%-80%", "80%-100%")
+legend("bottomleft", legend=leg.txt, xpd = TRUE, cex=1.5, bty="n", horiz = FALSE, 
+       fill = color.pallete)
+dev.off()
+```
+
+

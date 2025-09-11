@@ -1,0 +1,93 @@
+Colorectal Cancers 95-97
+Late stage at diagnosis by county
+ county code   county name          late stage  proportion  total
+            1  Aitkin                    19      .4524       42
+            3  Anoka                    151      .5336      283
+            5  Becker                    24      .3380       71
+            7  Beltrami                  41      .7193       57
+            9  Benton                    29      .5800       50
+           11  Big Stone                 15      .5769       26
+           13  Blue Earth                57      .5938       96
+           15  Brown                     35      .5738       61
+           17  Carlton                   36      .5143       70
+           19  Carver                    43      .5811       74
+           21  Cass                      38      .5588       68
+           23  Chippewa                  26      .7879       33
+           25  Chisago                   32      .5246       61
+           27  Clay                      55      .4741      116
+           29  Clearwater                14      .6364       22
+           31  Cook                       7      .7000       10
+           33  Cottonwood                21      .5000       42
+           35  Crow Wing                 50      .5814       86
+           37  Dakota                   206      .5613      367
+           39  Dodge                     16      .6667       24
+           41  Douglas                   42      .6176       68
+           43  Faribault                 36      .7826       46
+           45  Fillmore                  27      .5745       47
+           47  Freeborn                  37      .5692       65
+           49  Goodhue                   43      .6324       68
+           51  Grant                     13      .5909       22
+           53  Hennepin                 903      .6089     1483
+           55  Houston                   17      .4250       40
+           57  Hubbard                   16      .3810       42
+           59  Isanti                    18      .5294       34
+           61  Itasca                    51      .4766      107
+           63  Jackson                   11      .5000       22
+           65  Kanabec                   12      .6316       19
+           67  Kandiyohi                 44      .6111       72
+           69  Kittson                   12      .7500       16
+           71  Koochiching               19      .6129       31
+           73  Lac Qui Parle             13      .6842       19
+           75  Lake                      12      .4615       26
+           77  Lake Of The Woods         10      .9091       11
+           79  Le Sueur                  23      .5000       46
+           81  Lincoln                   17      .5862       29
+           83  Lyon                      28      .6512       43
+           85  Mcleod                    36      .6316       57
+           87  Mahnomen                  10      .5882       17
+           89  Marshall                  23      .6571       35
+           91  Martin                    43      .6615       65
+           93  Meeker                    28      .5600       50
+           95  Mille Lacs                23      .5000       46
+           97  Morrison                  40      .5479       73
+           99  Mower                     70      .4636      151
+          101  Murray                    14      .7368       19
+          103  Nicollet                  19      .5758       33
+          105  Nobles                    24      .5217       46
+          107  Norman                    14      .6667       21
+          109  Olmsted                  106      .6503      163
+          111  Otter Tail                81      .5031      161
+          113  Pennington                17      .4474       38
+          115  Pine                      25      .5102       49
+          117  Pipestone                  9      .6000       15
+          119  Polk                      49      .6712       73
+          121  Pope                      21      .5122       41
+          123  Ramsey                   427      .5755      742
+          125  Red Lake                   6      .5000       12
+          127  Redwood                   39      .7647       51
+          129  Renville                  28      .7368       38
+          131  Rice                      47      .6026       78
+          133  Rock                      13      .7222       18
+          135  Roseau                    18      .5455       33
+          137  St Louis                 232      .5011      463
+          139  Scott                     43      .5584       77
+          141  Sherburne                 50      .7042       71
+          143  Sibley                    19      .5000       38
+          145  Stearns                   89      .5298      168
+          147  Steele                    30      .5263       57
+          149  Stevens                   16      .5926       27
+          151  Swift                     25      .6410       39
+          153  Todd                      21      .4884       43
+          155  Traverse                   6      .4000       15
+          157  Wabasha                   25      .6944       36
+          159  Wadena                    27      .6000       45
+          161  Waseca                    16      .5161       31
+          163  Washington                87      .5241      166
+          165  Watonwan                  28      .7000       40
+          167  Wilkin                    14      .5833       24
+          169  Winona                    59      .6277       94
+          171  Wright                    63      .5888      107
+          173  Yellow Medicine           19      .4222       45
+
+  Total Cases = 7726
+
