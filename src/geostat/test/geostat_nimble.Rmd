@@ -1,0 +1,310 @@
+---
+title: "Colorado temperature analysis"
+author: "Sudipto Banerjee"
+output: html_document
+---
+
+```{r global_options, echo=FALSE}
+knitr::opts_chunk$set(comment = NA, tidy = TRUE)
+```
+
+## Colorado spring temperature data
+These data were originally part of the `fields` package's `COmonthlyMet` dataset. Begin by removing all objects from memory for a fresh start. Then load the Rdata
+```{r, clean_memory_load_data}
+rm(list=ls())
+load("../data/CO-temp-data.RData")
+ls()
+```
+
+Our goal is to create a complete prediction surface of minimum spring temperature with associated estimates of uncertainty.
+
+```{r, load_packages}
+library(fields)
+library(MBA)
+library(geoR)
+library(sf)
+library(leaflet)
+```
+We set up a `leaflet` "base map" to help visualize the data.
+```{r, leaflet_basemap}
+blue.red <- c("#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c")
+
+base.map <- leaflet(width = "100%") %>%
+    addProviderTiles("Esri.WorldImagery", group = "Satellite") %>%
+    addLayersControl(baseGroup = c("Satellite"), options = layersControlOptions(collapsed = FALSE))
+```
+
+Take a look at station locations and mean minimum spring temperatures across Colorado. You can zoom in and out as well.
+```{r, map_stations}
+pal <- colorNumeric(blue.red, domain = temp)
+
+base.map %>%
+    addCircleMarkers(lng = coords[, 1], lat = coords[, 2], col = pal(temp), stroke = FALSE,
+        radius = 5, fillOpacity = 0.9, popup = paste("Mean min temp:", round(temp,
+            1))) %>%
+    addLegend("bottomright", pal = pal, values = temp, opacity = 0.9, title = "Temperature C")
+```
+
+We'll reproject the geographic coordinates (i.e., longitude and latitude) to a coordinate system that provides a bit more intuition about distance and reduces spatial distortion. We will use a widely used projection system called the Universal Transverse Mercator (UTM) coordinate system. This system first uses a transverse Mercator projection to transform the geographic coordinates to planar coordinates. The Mercator projection preserves directions or angles (is a conformal projection), but distorts distances. In order to minimize the distortion of distances, the UTM coordinate system divides the earth into 60 zones, each of width 6 degrees, and uses the transverse Mercator projection in each zone. The UTM projection is widely used in scientific applications of spatial data when most of the locations fall within a single UTM zone. A useful excercise here is to use write 2 functions: one to locate a point's UTM zone; and a second to find the zone where most of the points lie in.  
+```{r, find_UTM_zones}
+lon2UTM <- function(longitude) {
+    (floor((longitude + 180)/6) %% 60) + 1
+} ##Function to find the UTM zone of a geographic coordinate in the western hemisphere (only longitude is needed).
+
+Mode <- function(x, na.rm = FALSE) {
+  if(na.rm){
+    x = x[!is.na(x)]
+  }
+
+  ux <- unique(x)
+  return(ux[which.max(tabulate(match(x, ux)))])
+} ##Function to calculate the mode of the above data to find which zone contains most of the points
+utmZone <- Mode(lon2UTM(coords$lon))
+utmZone
+```
+The UTM projection uses only one zone to project all the points and, hence, works best if all the points fit into one zone. However, in practice, we could use the two functions defined above to choose the zone where most of the points lie and use that zone as an approximation. We also convert the UTM distance units from meters to kilometers.
+```{r, reproject_coords}
+coordsGeog <- st_as_sf(coords, coords=c("lon","lat"), crs="+proj=longlat +datum=WGS84 +no_defs")
+coordsUTM <- st_transform(coordsGeog, crs="+proj=utm +zone=13 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+coordsUTM <- st_coordinates(coordsUTM)/1000
+class(coordsUTM)
+```
+
+Let us create a new data frame with with the variables temperature, elevation (after converting it to kms) and the projected coordinates.
+```{r, create_data_frame_with_projected_points}
+elev <- elev/1000
+df <- data.frame(temp, elev, coordsUTM)
+names(df) <- c("temp", "elev", "xUTM", "yUTM")
+```
+
+We will now turn to Bayesian hierarchical modeling using `nimble`. Load the package.
+```{r, load_nimble}
+library("nimble")
+```
+We will build a simple linear regression model in `nimble`.
+```{r, nimble_simple_linear_model}
+lmCode <- nimbleCode({
+        for (i in 1:N) {
+                Y[i] ~ dnorm(mu[i], tausq)
+                mu[i] <- inprod(X[i,1:p], beta[1:p])
+            yFit[i] ~ dnorm(mu[i], tausq)
+	    yResid[i] <- Y[i] - mu[i]
+    }
+
+    for (i in 1:p) { beta[i] ~ dflat()}
+    tausq ~ dgamma(a, b)
+    sigma <- 1/sqrt(tausq)
+}
+)   
+```
+
+Define the model parameters to be recognized by the nimble model.
+```{r, model_parameters}
+modelParameters <- c("beta", "tausq", "sigma", "yFit", "yResid")
+```
+
+We will first fit a simple linear regression with temperature as the dependent variable and the two spatial coordinates as the predictors. Create the data, constantsi, hyperparameter values and also a list of initial values. 
+```{r, fit_lm}
+nimbleData <- list(Y = df$temp)
+N <- nrow(df)
+X <- cbind(rep(1, times=N), df$xUTM, df$yUTM)
+p <- ncol(X)
+a <- 1.0E-3
+b <- 1.0E-3
+nimbleConstants <- list(N=N, X=X, p=p, a=a, b=b)
+nimbleInits <- list(beta=rep(0, times=p), tausq=1.0, yFit=rep(0, times=N)) 
+```
+
+Create the "nimbleModel" object.
+```{r, nimble_model}
+rModel <- nimbleModel(code=lmCode, name="coloradoLM", constants=nimbleConstants, data=nimbleData, inits=nimbleInits)
+```
+
+Specify the inputs to `nimbleMCMC`: (i) number of chains to run; (ii) number of iterations per chain; and (iii) number of initial iterations to let the chains "burn" (these samples will be discarded and not used for posterior inference).
+```{r, nimble_mcmc_inputs}
+n_iter = 11000 ## Number of iterations per chain
+n_chains = 1 ## Number of different chains
+n_burn = 1000 ## Number of initial iterations ("burn" period) for MCMC to converge. These samples will be discarded and not used in posterior inference. 
+```
+
+Create the `nimbleMCMC` object to compile the code and run the MCMC algorithm. We can set `WAIC=TRUE` to compute and store the "Watanabe-Akaike Information Criterion"  model assessment score or calculate it later.
+```{r, nimble_mcmc}
+mcmc.out <- nimbleMCMC(model=rModel, monitors=modelParameters, inits=nimbleInits, nchains=n_chains, niter = n_iter, nburnin=n_burn, samplesAsCodaMCMC = TRUE)
+```
+
+Extract posterior samples:
+```{r, posterior_samples}
+samps <- as.matrix(mcmc.out)
+dim(samps)
+```
+
+Find WAIC score.
+```{r, waic}
+calculateWAIC(samps, rModel)
+```
+
+Obtain medians and 95% credible intervals for the model parameters from these samples
+```{r, credible_intervals}
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+```
+
+Extract credible intervals for specific variable(s):
+```{r, credible_intervals_specific_variables}
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+#CI_yFit ##Uncomment to print credible intervals of replicated data
+```
+
+Get the posterior median of the residuals:
+```{r, median_residuals}
+CI_yResid <- credibleIntervals[grep("yResid", rownames(credibleIntervals)),]
+yResidPosteriorMedians <- CI_yResid[,grep("50%", colnames(CI_yResid))]
+```
+
+Next let's take a look at the regression model residuals, assess their spatial independence, and start thinking about variogram and covariance parameters.
+```{r, plot_variograms, fig.align="center", fig.width=10, message=FALSE}
+dMax <- max(rdist(coordsUTM))
+dMax
+
+vTemp <- variog(coords=coordsUTM, data=df$temp, uvec=(seq(0, 0.75*dMax, length=20)))
+
+vResid <- variog(coords=coordsUTM, data=yResidPosteriorMedians, uvec=(seq(0, 0.75*dMax, length=20)))
+
+
+par(mfrow=c(1,2))
+plot(vTemp, xlab="Distance (km)")
+plot(vResid, xlab="Distance (km)")
+```
+
+It is also helpful to create an interpolated surface of the model residuals to further assess spatial structure and potentially identify missing covariates.
+```{r, mba_residual}
+resid.surf <- mba.surf(cbind(coords, yResidPosteriorMedians), no.X = 200, no.Y = 200, extend = TRUE, sp = TRUE)$xyz.est
+
+library(sp)
+library(raster)
+
+proj4string(resid.surf) <- "+proj=longlat +datum=WGS84"
+
+resid.surf <- raster(resid.surf)
+
+pal <- colorNumeric(blue.red, values(resid.surf), na.color = "transparent")
+
+base.map %>%
+    addRasterImage(resid.surf, colors = pal, opacity = 0.75, group = "Regression residuals") %>%
+    addLegend("bottomright", pal = pal, values = values(resid.surf), opacity = 0.75,
+        title = "<center>Regression<br> residuals</center>") %>%
+    addLayersControl(baseGroup = c("Satellite"), overlayGroups = c("Regression residuals"),
+        options = layersControlOptions(collapsed = FALSE))
+##knitr::knit_exit()
+```
+
+Next we will build the Bayesian geostatistics model.
+```{r, geostat_code}
+geostatCode <- nimbleCode({
+        for (i in 1:N) {
+                Y[i] ~ dnorm(mu[i], tausq)
+                mu[i] <- inprod(X[i,1:p], beta[1:p]) + w[i]
+            yFit[i] ~ dnorm(mu[i], tausq)
+            yResid[i] <- Y[i] - mu[i]
+    }
+        
+	w[1:N] ~ dmnorm(zeros[1:N], cov=spCov[1:N,1:N])
+        for (i in 1:p) { beta[i] ~ dflat() }
+
+        sigmasqSp <- 1/(deltasq*tausq)        
+	spCov[1:N,1:N] <- sigmasqSp*spCor[1:N,1:N]
+
+        tausq ~ dgamma(a, b)
+        sigma <- 1/sqrt(tausq)
+}
+)
+```
+
+We collect the model parameters.
+```{r, model_parameters_spatial}
+modelParameters <- c("beta", "tausq", "sigma", "sigmasqSp", "w", "yFit", "yResid")
+```
+
+We modify our nimbleConstants and nimbleInits accordingly.
+```{r, constants_and_inits_spatial}
+Dist <- rdist(coordsUTM)
+phi <- 3/300 ##See where variogram flattens
+spCor <- exp(-phi*Dist)
+deltasq <- 1/11 ##From the variogram get the ratio of the nugget/(sill-nugget)
+zeros <- rep(0, times=N)
+nimbleConstants <- list(N=N, X=X, p=p, a=a, b=b, spCor=spCor, deltasq=deltasq, zeros=zeros)
+nimbleInits <- list(beta=rep(0, times=p), tausq=1.0, yFit=rep(0, times=N), w=rep(0, times=N))
+```
+
+Create the "nimbleModel" object.
+```{r, nimble_model_spatial}
+rModel <- nimbleModel(code=geostatCode, name="coloradoSP", constants=nimbleConstants, data=nimbleData, inits=nimbleInits)
+```
+
+Specify the inputs to `nimbleMCMC`: (i) number of chains to run; (ii) number of iteratiors per chain; and (iii) number of initial iterations to let the chains "burn" (these samples will be discarded and not used for posterior inference).
+```{r, nimble_mcmc_inputs_spatial}
+n_iter = 11000 ## Number of iterations per chain
+n_chains = 1 ## Number of different chains
+n_burn = 1000 ## Number of initial iterations ("burn" period) for MCMC to converge. These samples will be discarded and not used in posterior inference. 
+```
+
+Create the `nimbleMCMC` object to compile the code and run the MCMC algorithm. We can set `WAIC=TRUE` to compute and store the "Watanabe-Akaike Information Criterion"  model assessment score or calculate it later.
+```{r, nimble_mcmc_spatial}
+mcmc.out <- nimbleMCMC(model=rModel, monitors=modelParameters, inits=nimbleInits, nchains=n_chains, niter = n_iter, nburnin=n_burn, samplesAsCodaMCMC = TRUE)
+```
+
+Extract posterior samples:
+```{r, posterior_samples_spatial}
+samps <- as.matrix(mcmc.out)
+dim(samps)
+```
+
+Find WAIC score.
+```{r, waic_spatial}
+calculateWAIC(samps, rModel)
+```
+
+Obtain medians and 95% credible intervals for the model parameters from these samples
+```{r, credible_intervals_spatial}
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+```
+
+Extract credible intervals for specific variable(s):
+```{r, credible_intervals_specific_variables_spatial}
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+#CI_yFit ##Uncomment to print the credible intervals of replicated data
+
+CI_w <- credibleIntervals[grep("w", rownames(credibleIntervals)),]
+wPosteriorMedians <- CI_w[, grep("50%", colnames(CI_w))]
+```
+
+Map the spatial process.
+```{r, map_spatial_process}
+processSurf <- mba.surf(cbind(coords, wPosteriorMedians), no.X = 200, no.Y = 200,
+    extend = TRUE, sp = TRUE)$xyz.est
+
+proj4string(processSurf) <- "+proj=longlat +datum=WGS84"
+
+processSurf <- raster(processSurf)
+
+pal <- colorNumeric(blue.red, values(processSurf), na.color = "transparent")
+
+base.map %>%
+    addRasterImage(processSurf, colors = pal, opacity = 0.75, group = "Spatial process") %>%
+    addLegend("bottomright", pal = pal, values = values(processSurf), opacity = 0.75,
+        title = "<center>Spatial<br> process</center>") %>%
+    addLayersControl(baseGroup = c("Satellite"), overlayGroups = c("Spatial process"),
+        options = layersControlOptions(collapsed = FALSE))
+```
+
