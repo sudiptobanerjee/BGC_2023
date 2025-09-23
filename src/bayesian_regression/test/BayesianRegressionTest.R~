@@ -1,0 +1,27 @@
+set.seed(1234)
+
+source("BayesianRegression.R")
+
+dataObject <- read.table("~/public_html/ph5470/LinearModelExample.txt", header=T)
+
+dataObject.lm <- lm(Y ~ X1+X2+X3+X4+X5+X6, data = dataObject)
+
+lm.frame = model.frame(dataObject.lm)
+lm.frame.cov = vcov(dataObject.lm)
+
+n = nrow(lm.frame)
+p = ncol(lm.frame.cov)
+
+nsample <- 500
+
+out.bayes.lm.ref <- bayes.lm.ref(dataObject.lm, nsample)
+
+beta.prior.mean <- rep(0, times=p)
+
+beta.prior.precision <- matrix(0, nrow=p, ncol=p)
+
+prior.shape <- -p/2
+
+prior.rate <- 0
+
+out.bayes.lm.conjugate <- bayes.lm.conjugate(dataObject.lm, nsample, beta.prior.mean, beta.prior.precision, prior.shape, prior.rate)

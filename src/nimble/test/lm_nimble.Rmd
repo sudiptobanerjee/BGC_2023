@@ -1,0 +1,215 @@
+---
+title: "Introduction to \"nimble\": Bayesian linear regression"
+author: Sudipto Banerjee
+institute: UCLA
+output: html_document
+date: "2023-10-17"
+---
+0. The root directory for this project has 3 subfolders: "data", "src" and "test". The source Rmd file is in the "test" directory. The "data" directory contains the data sets for this linear regression example. The "src" directory contains a nimble model in the "model_nimble.txt" file and an R program called "data_prep.R" to prepare the data into nimble format.
+
+1. Remove all objects from R workspace---good programming practice and can help debug your code better.
+```{r}
+rm(list = ls())
+```
+
+2. Prepare the data by running the "data_prep.R" file in the "src" directory. When preparing the data, it is important to note that "nimble" expects the dependent random variable(s) being modeled to be stored as a separate object from the covariates and other fixed variables. So we create "nimbleData" to store the "Y" and "nimbleConstants" to store the fixed matrix of regressors "X" and other constants.    
+```{r}   
+source("../src/data_prep.R")
+```
+3. Load "nimble" and "coda" packages. Optionally, set the seed.
+```{r}
+library(nimble)
+library(coda)
+set.seed(1234) ##Optional
+```
+
+4. The code in "data_prep.R" creates "nimbleData" (Y), "nimbleConst" (X) and "nimbleInits". For "nimbleInits", apart from the different model parameters, we also initialize a variable "yFit" that represents the (posterior predictive) model-fitted distribution for each data point, i.e., "yFit[i] ~ dnorm(mu[i], tausq)" in the nimbleCode. 
+```{r}
+attributes(nimbleData)
+attributes(nimbleConstants)
+attributes(nimbleInits)
+```
+We will run 3 chains in our MCMC algorithm. We will need initial values for the model parameters.
+   
+
+5. Set the following variables:
+```{r}
+n_iter = 11000 ## Number of iterations
+n_chains = length(nimbleInits) ## Number of different chains
+n_burn = 1000 ## Number of initial runs ("burn" period) for MCMC to converge. 
+```
+
+6. Define the model parameters to be recognized by the nimble model
+```{r}   
+model_parameters = c("beta", "tausq", "sigma", "yFit")
+```
+
+7. Read the nimble code from text file
+```{r}
+lmCode <- nimbleCode({
+        for (i in 1:N) {
+                Y[i] ~ dnorm(mu[i], tausq)
+                mu[i] <- inprod(X[i,1:p], beta[1:p])
+        	yFit[i] ~ dnorm(mu[i], tausq)
+	}
+
+                for (i in 1:p) { beta[i] ~ dflat()}
+                tausq ~ dgamma(0.001, 0.001)
+                sigma <- 1/sqrt(tausq)
+
+}
+)   
+```
+
+8. Create the nimbleModel
+```{r}   
+mcmc.out <- nimbleMCMC(code = lmCode, constants=nimbleConstants, data=nimbleData, inits = nimbleInits, nchains=n_chains, niter = n_iter, nburnin=n_burn, monitor=model_parameters)
+```
+
+
+9. Attributes of mcmc.out
+```{r}
+attributes(mcmc.out)
+```
+
+10. Extract posterior samples:
+```{r}
+samps <- rbind(mcmc.out$chain1, mcmc.out$chain2, mcmc.out$chain3)
+dim(samps)
+```
+
+13. Obtain medians and 95% credible intervals for these samples
+```{r}   
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+```
+
+14. Extract credible intervals for specific variable(s):
+```{r}   
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+CI_yFit
+```
+
+
+15. We will now draw samples from the data replicated distributions. First collect the posterior samples of "beta" and "sigma"
+```{r}
+	betaSamps <- samps[,1:p]
+	sigmaSamps <- samps[,(p+1)]
+	yFitSamps <- samps[,(p+3):ncol(samps)]
+```
+
+16. Rather than define "yFit" in the nimbleCode, we can also draw data replicates from the posterior predictive distribution directly in R using the following code. The matrix "yRep" below consists of the posterior predictive samples.    
+```{r}
+	muRep <- matrix(tcrossprod(betaSamps, X), ncol=1)
+	yRep <- rnorm(nrow(betaSamps)*N, muRep, rep(sigmaSamps, times=N))
+	yRep <- matrix(yRep, ncol=58)
+	CI_yRep <- t(apply(yRep, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+
+```
+
+17. The distribution of "yFit" and "yRep" should be the same so the only differences between their values are due to Monte Carlo sampling.  Compare inference using "yFitSamps" with "yRep". Plot posterior predictive medians of yFit and yRep.
+```{r}
+plot(CI_yRep[,grep("50%", colnames(CI_yRep))], CI_yFit[,grep("50%", colnames(CI_yFit))], xlab="Posterior medians using yRep", ylab="Posterior medians using yFit")
+abline(0,1)
+```
+
+18. Plot posterior predictive quantiles from these two objects:
+```{r}
+par(mfrow=c(1,2))
+plot(CI_yRep[,grep("2.5%", colnames(CI_yRep))], CI_yFit[,grep("2.5%", colnames(CI_yFit))], xlab="Posterior 2.5th quantiles using yRep", ylab="Posterior 2.5th quantiles using yFit")
+abline(0,1)
+plot(CI_yRep[,grep("97.5%", colnames(CI_yRep))], CI_yFit[,grep("97.5%", colnames(CI_yFit))], xlab="Posterior 97.5th quantiles using yRep", ylab="Posterior 97.5th quantiles using yFit")
+abline(0,1)
+```
+
+19. You can also do qqplots for the model-fitted values for any county. We do this for counties 1, 37 and 58 (just as examples).
+```{r}
+par(mfrow=c(1,3))
+qqplot(yRep[,1], yFitSamps[,1])
+abline(0,1)
+qqplot(yRep[,37], yFitSamps[,37])
+abline(0,1)
+qqplot(yRep[,58], yFitSamps[,58])
+abline(0,1)
+```
+
+Now that we have convinced ourselves that yFit and yRep are pretty much indistinguishable, we can just use one of these methods.
+
+20. We can define a goodness of fit measure "G" using yFit (or yRep).
+```{r}
+G <- sum((Y - colMeans(yFitSamps))^2)
+G
+```
+
+21. We can also define a measure of penalty "P" using yFit (or yRep).
+```{r}
+P <- sum(apply(yFitSamps, 2, function (x) {var(x)} ))
+P
+```
+
+22. Finally, we can use a score "D=G+P" for this model. This score is useful for model comparisons. The smaller the score, the better the model.
+```{r}
+D <- G+P
+D
+```
+
+23. Until now we have used a quick route to fitting a linear model in nimble. We will now demonstrate a more systematic route to compile and build a nimble program and then run the MCMC. reate the "nimbleModel" object. Compile it and configure the MCMC
+```{r, nimble_model_geostat_full_compile_and_configure}
+rModel <- nimbleModel(code=lmCode, name="lm_simple", constants=nimbleConstants, data=nimbleData)
+cModel <- compileNimble(rModel)
+conf <- configureMCMC(rModel, monitors=model_parameters)
+MCMC <- buildMCMC(conf)
+cMCMC <- compileNimble(MCMC, project = cModel)
+```
+
+24. Next we run the MCMC and combine the output from the 3 chains into a single matrix whose columns will include the posterior samples corresponding to each parameter.
+```{r, run_MCMC}
+samps <- runMCMC(cMCMC, inits=nimbleInits, nchains=length(nimbleInits), niter=n_iter, nburnin = n_burn, samplesAsCodaMCMC = TRUE)
+samps <- do.call(rbind, samps)
+```
+
+25. Obtain medians and 95% credible intervals for the model parameters from these samples
+```{r, credible_intervals_spatial}
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+```
+
+26. Extract medians and 95% credible intervals for specific model parameters.
+```{r}
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+## CI_yFit ##Uncomment to see posterior credible intervals of all fitted values.
+```
+
+27. Get all posterior samples of yFit.
+```{r}
+yFitSamps <- samps[,grep("yFit", colnames(samps))]
+```
+
+28. Compute a goodness-of-fit measure.
+```{r}
+G <- sum((Y - colMeans(yFitSamps))^2)
+G
+```
+
+28. Compute a measure of penalty.
+```{r}
+P <- sum(apply(yFitSamps, 2, function (x) {var(x)} ))
+P
+```
+
+29. Compute the model score “D=G+P” for this model. This score is useful for model comparisons. The smaller the score, the better the model.
+```{r}
+D <- G + P
+D
+```
+

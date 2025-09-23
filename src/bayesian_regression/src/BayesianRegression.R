@@ -1,0 +1,249 @@
+##set.seed(1234)
+
+##library(MASS)
+library(mvtnorm)
+library(fields)
+library(magic)
+
+param.quantiles <- function(gibbsout)
+{
+
+  if (is.data.frame(gibbsout)) {
+    p <- ncol(gibbsout)
+    temp <- matrix(rep(0,times=p*3), ncol=3, byrow=T)
+
+	for(i in 1:p)
+	{
+	temp[i,] <- quantile(gibbsout[,i], c(0.50, 0.025, 0.975))
+      }
+  }
+  else {
+    p <- 1
+    temp <- quantile(gibbsout, c(0.50,0.025,0.975))
+  }
+  
+  temp
+}
+
+bayes.normal.reference <- function(sample.mean, sample.var, sample.size, NITER) {
+  n = sample.size
+  y.bar = sample.mean
+  s.sq = sample.var
+  sigmasq.post <- 1/rgamma(NITER, (n-1)/2, (n-1)*s.sq/2)
+  mu.post <- rep(0,times=NITER)
+  for (i in 1:NITER) {
+    mu.post[i] = rnorm(1, y.bar, sqrt(sigmasq.post[i]/n))
+  }
+  out = cbind(mu.post, sigmasq.post)
+  out = as.data.frame(out)
+  names(out) = c("mu.posterior","sigmasq.posterior")
+  return(out)
+}
+
+
+bayes.lm.ref <- function(lmObject, NITER) {
+  lmObject.data = model.frame(lmObject)
+  lmObject.cov = vcov(lmObject)
+  ##D.inv = diag(diag(solve(lmObjectcov)))
+  ##unit.corr = sqrt(D.inv)%*%unit.cov%*%sqrt(D.inv)
+  coeff.mean = coefficients(lmObject)
+
+  ##unit.coeff.post = mvrnorm(1000, mu=unit.coeff.mean, Sigma=unit.cov)
+  ##unit.coeff.post.qnt = param.quantiles(unit.coeff.post)
+
+  sigmasq = (summary(lmObject)$sigma)^2
+
+  N = nrow(lmObject.data)
+  p = ncol(lmObject.cov)
+  ## Simulate from marginal posterior [sigma^2 | y]
+  sigmasq.post <- 1/rgamma(NITER, (N-p)/2, (N-p)*sigmasq/2)
+  
+  ## Simulate from conditional posterior [beta | sigma^2, y]
+  coeff.post <- matrix(0, nrow=NITER,ncol=p)
+  for (i in 1:NITER) {
+    Sigma.coeff = (sigmasq.post[i]/sigmasq)*lmObject.cov
+    ##    coeff.post[i,] = mvrnorm(1, coeff.mean, Sigma.coeff)
+    coeff.post[i,] = rmvnorm(1, coeff.mean, Sigma.coeff)
+  }
+
+  posterior.samples = as.data.frame(cbind(coeff.post, sigmasq.post))
+  
+  Parameter.summary = data.frame(param.quantiles(posterior.samples),row.names=c(names(coefficients(lmObject)),"sigma^2")) 
+  names(Parameter.summary) =  c("50%","2.5%","97.5%")
+  Parameter.summary
+}
+
+normal.igamma.sampler <- function(nsample, mu, V, a, b){
+
+  sigmasq <-  1/rgamma(nsample, a, b)
+
+  p <- length(mu)
+  beta <- matrix(0, nrow=nsample,ncol=p)
+
+  for (i in 1:nsample) {
+##    beta[i,] <- mvrnorm(1, mu, sigmasq[i]*V)
+    beta[i,] <- rmvnorm(1, mu, sigmasq[i]*V)
+  }
+
+  Output <- as.data.frame(cbind(beta, sigmasq))
+  
+  Output
+}
+
+bayes.lm.conjugate <- function(lmObject, nsample, beta.prior.mean, beta.prior.precision, prior.shape, prior.rate, prior.scale=1/prior.rate) {
+  
+  lmObject.data = model.frame(lmObject)
+
+  n <- nrow(lmObject.data)
+  
+  Y <- lmObject.data[,1]
+  X <- lmObject.data[,2:ncol(lmObject.data)]
+  X <- as.matrix(cbind(rep(1, times=nrow(lmObject.data)), X))
+
+  p <- ncol(X)
+  
+  V.beta.inv <- beta.prior.precision
+  mu <- beta.prior.mean
+  
+  tXX <- crossprod(X)
+  
+  posterior.precision <- V.beta.inv + tXX
+  posterior.variance <- chol2inv(chol(posterior.precision))
+  posterior.mean <- posterior.variance%*%(V.beta.inv%*%mu + t(X)%*%Y)
+
+  posterior.shape <- prior.shape + n/2
+  posterior.rate <- prior.rate + 0.5*(t(mu)%*%V.beta.inv%*%mu + sum(Y*Y) - t(posterior.mean)%*%posterior.precision%*%posterior.mean)
+
+  posterior.samples <- normal.igamma.sampler(nsample, posterior.mean, posterior.variance, posterior.shape, posterior.rate)
+
+  Parameter.summary = data.frame(param.quantiles(posterior.samples),row.names=c(names(coefficients(lmObject)),"sigma^2")) 
+  names(Parameter.summary) =  c("50%","2.5%","97.5%")
+  Parameter.summary
+  
+}
+
+bayes.geostat.exp.simple <- function (lmObject, nsample, beta.prior.mean, beta.prior.precision, coords, phi, alpha, nugget.prior.shape, nugget.prior.rate) {
+  
+  lmObject.data = model.frame(lmObject)
+  
+  n <- nrow(lmObject.data)
+  
+  Y <- lmObject.data[,1]
+  X <- lmObject.data[,2:ncol(lmObject.data)]
+  X <- as.matrix(cbind(rep(1, times=nrow(lmObject.data)), X))
+
+  p <- ncol(X)
+
+  tildeX <- cbind(X, diag(n)) 
+  ttildeXtildeX <- crossprod(tildeX)
+  
+  D <- rdist(coords)
+  R.exp <- exp(-phi*D)
+  spatial.prior.precision <- chol2inv(chol(R.exp))
+  
+  V.theta.inv <- (1/alpha)* adiag(beta.prior.precision, spatial.prior.precision)
+  mu <- c(beta.prior.mean,rep(0,times=n))
+  
+  posterior.precision <- V.theta.inv + ttildeXtildeX
+  posterior.variance <- chol2inv(chol(posterior.precision))
+  posterior.mean <- posterior.variance%*%(V.theta.inv%*%mu + t(tildeX)%*%Y)
+
+  nugget.posterior.shape <- prior.shape + n/2
+  nugget.posterior.rate <- prior.rate + 0.5*(t(mu)%*%V.theta.inv%*%mu + sum(Y*Y) - t(posterior.mean)%*%posterior.precision%*%posterior.mean)
+
+  posterior.samples <- normal.igamma.sampler(nsample, posterior.mean, posterior.variance, nugget.posterior.shape, nugget.posterior.rate)
+
+  beta.posterior.samples <- posterior.samples[,1:p]
+  spatial.effects.posterior.samples <- posterior.samples[,(p+1):(p+n)]
+  nugget.posterior.samples <- posterior.samples[,(n+p+1)]
+  spatial.variance.posterior.samples <- alpha*nugget.posterior.samples
+ 
+  list( beta.posterior.samples,
+  spatial.effects.posterior.samples,
+  nugget.posterior.samples,
+  spatial.variance.posterior.samples
+  )
+ 
+}
+
+## NOTE: The following function is a *faster* marginalized version of the above function. WARNING: The alpha here is tau^2/sigma^2 (noise-to-signal) and is the reciprocal of what was used in the above function.
+
+bayes.geostat.simple.marginalized <- function (lmObject, nsample, beta.prior.mean, beta.prior.precision, coords, phi, alpha, signal.prior.shape, signal.prior.rate) {
+  
+  lmObject.data = model.frame(lmObject)
+  
+  n <- nrow(lmObject.data)
+  
+  Y <- lmObject.data[,1]
+  X <- lmObject.data[,2:ncol(lmObject.data)]
+  X <- as.matrix(cbind(rep(1, times=nrow(lmObject.data)), X))
+
+  p <- ncol(X)
+
+  D <- rdist(coords)
+  R.exp <- exp(-phi*D)
+##  spatial.prior.precision <- chol2inv(chol(R.exp))
+
+  V.y <- R.exp + alpha*diag(nrow(R.exp))   
+  V.y.sqrt <- chol(V.y)  
+  V.y.inv <- chol2inv(V.y.sqrt)
+  ttildeXtildeX <- t(X)%*%V.y.inv%*%X
+  mu <- beta.prior.mean
+
+
+  posterior.precision <- beta.prior.precision + ttildeXtildeX
+  posterior.variance <- chol2inv(chol(posterior.precision))
+  posterior.mean <- posterior.variance%*%(beta.prior.precision%*%mu + t(X)%*%V.y.inv%*%Y)
+
+  signal.posterior.shape <- signal.prior.shape + n/2
+  signal.posterior.rate <- signal.prior.rate + 0.5*(t(mu)%*%beta.prior.precision%*%mu + t(Y)%*%V.y.inv%*%Y - t(posterior.mean)%*%posterior.precision%*%posterior.mean)
+
+  posterior.samples <- normal.igamma.sampler(nsample, posterior.mean, posterior.variance, signal.posterior.shape, signal.posterior.rate)
+
+  beta.posterior.samples <- posterior.samples[,1:p]
+  signal.posterior.samples <- posterior.samples[,(p+1)]
+  noise.variance.posterior.samples <- alpha*signal.posterior.samples  
+
+   list( beta.posterior.samples,
+   signal.posterior.samples,
+   noise.variance.posterior.samples
+  )
+
+
+}
+
+sp.effects.recover <- function(lmObject, coords, beta.posterior.samples, signal.posterior.samples, alpha) {
+
+lmObject.data = model.frame(lmObject) 
+n.samples = length(signal.posterior.samples)
+
+Y <- lmObject.data[,1]
+X <- lmObject.data[,2:ncol(lmObject.data)]
+X <- as.matrix(cbind(rep(1, times=nrow(lmObject.data)), X))
+
+n <- length(Y)
+p <- ncol(X)
+
+D <- rdist(coords)
+R.exp <- exp(-phi*D)
+R.exp.inv <- chol2inv(chol(R.exp))
+
+V.w <- chol2inv(chol(R.exp.inv + (1/alpha)*diag(n)))
+L.w <- t(chol(V.w)) ##The t() is needed to get the Lower-triangle
+
+w = matrix(0, nrow=n.samples, ncol=n)
+
+mu.w = matrix(0, nrow=n.samples, ncol=n)
+
+for (i in 1:n.samples) {
+	print(i)
+	mu.w[i,] = V.w%*%(Y - X%*%beta.posterior.samples[i,])*(1/alpha)
+	z = rnorm(n, 0, 1)
+	w[i,] = mu.w[i,] + sqrt(signal.posterior.samples[i])*L.w%*%z
+##	w[i,] = rmvnorm(1, mean=mu.w[i,], sigma=signal.posterior.samples[i]*V.w)
+}
+
+return(w)
+
+}
+

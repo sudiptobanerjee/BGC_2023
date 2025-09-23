@@ -1,0 +1,200 @@
+---
+title: "Bayesian Conditional Autoregression Models in \"rjags\""
+output: html_document
+author: Sudipto Banerjee
+date: "2023-10-10"
+---
+0. The root directory for this project has 3 subfolders: "data", "src" and "test". This Rmd file is in the "test" directory. The "data" directory contains the data sets for this spatial example. The "src" directory contains a JAGS model in the "model_jags_arealModeling.txt" file and an R program called "data_prep_arealModeling.R" to prepare the data in JAGS format.
+
+1. Remove all objects from R workspace---good programming practice and can help debug your code better.
+```{r}
+rm(list = ls())
+```
+
+2. Load "rjags" and "coda" packages
+```{r}
+library(rjags)
+library(coda)
+```
+
+3. Prepare the data by running the "data_prep.R" file in the "src" directory.
+```{r}   
+source("../src/data_prep_arealModeling.R")
+```
+
+4. We will run 3 chains in our MCMC algorithm. We will need initial values for the model parameters.
+```{r}
+inits = list(
+	     list(beta=rep(0,times=p), tausq=1.0, tausqSp=1.0, w=rep(0, times=N), yFit = rep(0, times=N)),
+	     list(beta=rep(-100, times=p), tausq=1.0, tausqSp=1.0, w=rep(0, times=N), yFit = rep(0, times=N)),
+	     list(beta=rep(100,times=p), tausq=1.0, tausqSp=1.0, w=rep(0, times=N), yFit = rep(0, times=N))
+)
+```
+
+5. Set the following variables:
+```{r}
+nSamp = 10000 ## Number of posterior samples to be used for inference
+nChains = 3 ## Number of different chains
+nAdapt = 500 ## The initial number of runs to tune parameters
+nBurn = 1000 ## Number of initial runs ("burn" period) for MCMC to converge. 
+```
+
+6. Define the model parameters to be recognized by the JAGS model
+```{r}   
+model.parameters = c("beta", "tausq", "w", "tausqSp", "sigma", "sigmaSp", "yFit")
+```
+
+7. Compile the program and adapt for tuning
+```{r}   
+m1 <- jags.model("../src/model_jags_arealModeling.txt", data=jagsData, inits = inits, n.chains=nChains, n.adapt = nAdapt, quiet=TRUE)
+```
+
+8. Update and burn:
+```{r}   
+update(m1, n.iter=nBurn)
+```
+
+9. Use the "coda" package to collect MCMC samples for "nSamp" iterations after the burn period.
+```{r} 
+m1.out <- coda.samples(model=m1, variable.names=model.parameters, n.iter=nSamp)
+```
+
+10. Descriptive statistics of posterior densities
+```{r}
+sm <- summary(m1.out)
+```
+
+11. Extract posterior samples across the multiple chains and save them as a matrix:
+```{r}
+samps <- do.call(rbind, m1.out)
+dim(samps)
+```
+
+12. Obtain medians and 95% credible intervals for these samples
+```{r}   
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+credibleIntervals
+```
+
+13. Extract credible intervals for specific variable(s):
+```{r}   
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_sigmaSp <- credibleIntervals[grep("sigmaSp", rownames(credibleIntervals)),]
+CI_sigmaSp
+
+CI_w <- credibleIntervals[grep("w", rownames(credibleIntervals)),]
+CI_w
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+CI_yFit
+```
+
+14. Prepare to plot spatial random effects on a map. Load some packages
+```{r}
+library(maps)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+```
+
+15. Extract map of California from "maps" library. 
+```{r}
+caCounty = map("county","california", fill=TRUE, plot=FALSE)
+countyID <- sapply(strsplit(caCounty$names, ","), function(x) x[2])
+caCountySF <- st_as_sf(caCounty)
+```
+
+16. Plot posterior median of spatial random effects of the map. Plot raw data next to it.
+```{r}
+yFitPosteriorMedians <- CI_yFit[,grep("50%", colnames(CI_yFit))]
+caCountySF$ModelFitted <- yFitPosteriorMedians
+caCountySF$ObsData <- Y
+brksModelFitted = quantile(caCountySF$ModelFitted, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brksObsData = quantile(caCountySF$ObsData, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+colorPalette = rev(brewer.pal(5,"RdBu"))
+
+par(mfrow=c(1,2), oma = c(0,0,4,0) + 0.1, mar = c(0,0,1,0) + 0.1)
+
+plot(caCountySF["ObsData"], pal = colorPalette, breaks = brksObsData, main = "Age adjusted lung cancer rates")
+
+plot(caCountySF["ModelFitted"], pal = colorPalette, breaks = brksModelFitted, main = "Model fitted lung cancer rates")
+```
+
+17. Model assessment: How good is this model? Is it "adequate"? Find the correlation between the model fitted values and the observed data. Then plot fitted values against raw data
+```{r}
+cor(Y, yFitPosteriorMedians) ## correlation between observed and model fitted values 
+plot(Y, yFitPosteriorMedians, xlab="Observed data", ylab="Model fitted data")
+abline(0,1) ## adds the 45 degree (y=x) line to identify departures of fitted values from observations.
+```
+
+18. Our next step will be to assign a score for this model based upon the posterior distribution of fitted values. This distribution is $p(yFit \mid Y)$ and the resulting model fitted values are referred to as model replicated data. We first extract the posterior samples of "yFit" from "samps".
+```{r}
+yFitSamps <- samps[,grep("yFit", colnames(samps))]
+```
+
+19. We define a goodness of fit measure "G" based on the sum of squared differences between the observations and the means of the replicated data for each data point.
+```{r}
+G <- sum((Y - colMeans(yFitSamps))^2)
+G
+```
+
+20. We define a measure of penalty "P" that penalizes the complexity of the model based upon sum of the variances of the replicated data for each data point.
+```{r}
+P <- sum(apply(yFitSamps, 2, function (x) {var(x)} ))
+P
+```
+
+21. Finally, we define a model assessment score "D=G+P" for this model. This score is useful for model comparisons. The smaller the score, the better the model.
+```{r}
+D <- G+P
+D
+```
+
+22. Let us compare the D score of the spatial model with that of a simple linear regression model. We will again run 3 chains in our MCMC algorithm. We will need initial values for the model parameters, specify model parameters to monitor and run the model following essentially the same steps as for the spatial model. We run the code in one example block for convenience. You are, by now, quite familiar with these steps so a bit of quick documentation will not hurt.
+```{r}
+inits = list(
+	     list(beta=rep(0,times=p), tausq=1.0, yFit = rep(0, times=N)),
+	     list(beta=rep(-100, times=p), tausq=1.0, yFit = rep(0, times=N)),
+	     list(beta=rep(100,times=p), tausq=1.0, yFit = rep(0, times=N))
+)
+
+model.parameters = c("beta", "tausq", "sigma", "yFit")
+
+m2 <- jags.model("../src/model_jags_simpleLM.txt", data=jagsDataSimpleLM, inits = inits, n.chains=nChains, n.adapt = nAdapt, quiet=TRUE)
+
+update(m2, n.iter=nBurn)
+
+m2.out <- coda.samples(model=m2, variable.names=model.parameters, n.iter=nSamp)
+
+samps <- do.call(rbind, m2.out)
+
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+yFitPosteriorMedians <- CI_yFit[,grep("50%", colnames(CI_yFit))]
+cor(Y, yFitPosteriorMedians) ## correlation between observed and model fitted values 
+plot(Y, yFitPosteriorMedians, xlab="Observed data", ylab="Model fitted data")
+abline(0,1) ## adds the 45 degree (y=x) line to identify departures of fitted values from observations.
+
+
+yFitSamps <- samps[,grep("yFit", colnames(samps))]
+
+G <- sum((Y - colMeans(yFitSamps))^2)
+G
+
+P <- sum(apply(yFitSamps, 2, function (x) {var(x)} ))
+P
+
+D <- G+P
+D
+```
+
+Conclusion: Spatial model is clearly preferred due to its substantially lower D score. 
+   

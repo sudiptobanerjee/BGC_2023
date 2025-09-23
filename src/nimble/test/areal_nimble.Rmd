@@ -1,0 +1,149 @@
+---
+title: "Bayesian spatial autoregression in \"nimble\""
+author: Sudipto Banerjee
+institute: UCLA
+output: html_document
+date: "2023-10-17"
+---
+0. The root directory for this project has 3 subfolders: "data", "src" and "test". The source Rmd file is in the "test" directory. The "data" directory contains the data sets for this linear regression example. The "src" directory contains an R program called "data_prep_areal.R" to prepare the data into nimble format.
+
+1. Remove all objects from R workspace---good programming practice and can help debug your code better.
+```{r}
+rm(list = ls())
+```
+
+2. Prepare the data by running the "data_prep_areal.R" file in the "src" directory. When preparing the data, it is important to note that "nimble" expects the dependent random variable(s) being modeled to be stored as a separate object from the covariates and other fixed variables. So we create "nimbleData" to store the "Y" and "nimbleConstants" to store the fixed matrix of regressors "X" and other constants.    
+```{r}   
+source("../src/data_prep_areal.R")
+```
+
+3. Load "nimble" and "coda" packages
+```{r}
+library(nimble)
+library(coda)
+```
+
+4. The code in "data_prep_areal.R" creates "nimbleData" (Y), "nimbleConst" (X) and "nimbleInits". For "nimbleInits", apart from the different model parameters, we also initialize a variable "yFit" that represents the (posterior predictive) model-fitted distribution for each data point, i.e., "yFit[i] ~ dnorm(mu[i], tausq)" in the nimbleCode. 
+```{r}
+attributes(nimbleData)
+attributes(nimbleConstants)
+attributes(nimbleInits)
+```
+We will run 3 chains in our MCMC algorithm. We will need initial values for the model parameters.
+   
+5. Set the following variables:
+```{r}
+n_iter = 11000 ## Number of iterations
+n_chains = 3 ## Number of different chains
+n_burn = 1000 ## Number of initial runs ("burn" period) for MCMC to converge. 
+```
+
+6. Define the model parameters to be recognized by the nimble model
+```{r}   
+model_parameters = c("beta", "tausq", "sigma", "w", "sigma_sp", "yFit")
+```
+
+7. Include the nimble adjacency formats to nimbleData.
+```{r}   
+adjInfo <- as.carAdjacency(A)
+L <- length(adjInfo$adj)
+nimbleConstants <- c(nimbleConstants, adjInfo, L=L)
+```
+
+8. Read the nimble code from text file
+```{r}
+spCode <- nimbleCode({
+        for (i in 1:N) {
+                Y[i] ~ dnorm(mu[i], tausq)
+                mu[i] <- inprod(X[i,1:p], beta[1:p]) + w[i]
+        	yFit[i] ~ dnorm(mu[i], tausq)
+	}
+
+	w[1:N] ~ dcar_normal(adj[1:L], weights[1:L], num[1:N], tausq_sp, zero_mean = 1)
+	tausq_sp ~ dgamma(0.01, 0.01)
+	sigma_sp <- 1/sqrt(tausq_sp)
+
+	for (i in 1:p) { beta[i] ~ dflat()}
+	tausq ~ dgamma(0.001, 0.001)
+	sigma <- 1/sqrt(tausq)
+}
+)   
+```
+
+8. Create the nimbleModel and run MCMC
+```{r}   
+rModel <- nimbleModel(code = spCode, constants=nimbleConstants, data=nimbleData)
+mcmc.out <- nimbleMCMC(model = rModel, nchains=n_chains, inits=nimbleInits, niter = n_iter, nburnin=n_burn, monitor=model_parameters)
+##mcmc.out <- nimbleMCMC(code = spCode, constants=nimbleConstants, data=nimbleData, inits=nimbleInits, nchains=n_chains, niter = n_iter, nburnin=n_burn, monitor=model_parameters) ##The above two steps can be combined into one step
+
+```
+
+
+9. Attributes of mcmc.out
+```{r}
+attributes(mcmc.out)
+```
+
+10. Extract posterior samples:
+```{r}
+samps <- rbind(mcmc.out$chain1, mcmc.out$chain2, mcmc.out$chain3)
+dim(samps)
+```
+
+13. Obtain medians and 95% credible intervals for these samples
+```{r}   
+credibleIntervals <- t(apply(samps, 2, function(x){quantile(x, c(0.50, 0.025, 0.975))}))
+```
+
+14. Extract credible intervals for specific variable(s):
+```{r}   
+CI_beta <- credibleIntervals[grep("beta", rownames(credibleIntervals)),]
+CI_beta
+
+CI_sigma <- credibleIntervals[grep("sigma", rownames(credibleIntervals)),]
+CI_sigma
+
+CI_sigma_sp <- credibleIntervals[grep("sigma_sp", rownames(credibleIntervals)),]
+CI_sigma_sp
+
+CI_w <- credibleIntervals[grep("w", rownames(credibleIntervals)),]
+CI_w
+
+CI_yFit <- credibleIntervals[grep("yFit", rownames(credibleIntervals)),]
+CI_yFit
+```
+
+15. Prepare to plot spatial random effects on a map. Load some packages
+```{r}
+library(maps)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+```
+
+16. Extract map of California from "maps" library.
+```{r}
+caCounty = map("county","california", fill=TRUE, plot=FALSE)
+countyID <- sapply(strsplit(caCounty$names, ","), function(x) x[2])
+caCountySF <- st_as_sf(caCounty)
+```
+
+17. Plot posterior median of spatial random effects of the map. Plot raw data next to it.
+```{r}
+yFitPosteriorMedians <- CI_yFit[,grep("50%", colnames(CI_yFit))]
+caCountySF$ModelFitted <- yFitPosteriorMedians
+caCountySF$ObsData <- Y
+brksModelFitted = quantile(caCountySF$ModelFitted, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brksObsData = quantile(caCountySF$ObsData, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+colorPalette = rev(brewer.pal(5,"RdBu"))
+
+par(mfrow=c(1,2), oma = c(0,0,4,0) + 0.1, mar = c(0,0,1,0) + 0.1)
+
+plot(caCountySF["ObsData"], pal = colorPalette, breaks = brksObsData, main = "Age adjusted lung cancer rates")
+
+plot(caCountySF["ModelFitted"], pal = colorPalette, breaks = brksModelFitted, main = "Model fitted lung cancer rates")
+```
+
