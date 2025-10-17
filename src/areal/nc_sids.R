@@ -2,7 +2,7 @@
 
 rm(list=ls())
 library(spdep)
-library(maptools)
+library(sf)
 library(RColorBrewer)
 library(spatialreg)
 
