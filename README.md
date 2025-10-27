@@ -1,2 +1,2 @@
 # BGC_2023
-R programs and illustrations in the text "Hierarchical Modeling and Analysis for Spatial Data" Third Edition by Banerjee, Gelfand and Carlin.
+This repository contains several computer programs and illustrations to accompany the material in the text ["Hierarchical Modeling and Analysis for Spatial Data: Third Edition"](https://www.routledge.com/Hierarchical-Modeling-and-Analysis-for-Spatial-Data/Banerjee-Gelfand-Carlin/p/book/9781032508559?srsltid=AfmBOoqMdo0t4W2O4kXYaz8AMM2OiZPS179j_zBvWcXYDzcmx2XKU5aO) by [Banerjee](https://ph.ucla.edu/about/faculty-staff-directory/sudipto-banerjee), [Gelfand](https://scholars.duke.edu/person/alan) and [Carlin](https://www.counterpointstat.com/bradleycarlin.html).
