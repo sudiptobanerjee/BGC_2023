@@ -1,9 +1,18 @@
 ---
-title: "Part 1: Theory and Raw R Code"
+title: "Bayesian Linear Regression Using Conjugate Normal-Gamma priors"
 author: "Sudipto Banerjee"
 output: html_document
 ---
 
+*Note:* To generate this HTML file, run `renderRaw.sh` in the terminal from the `src/bayesianLinearRegressionExact/raw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh
+```
+
+---
 
 A Bayesian hierarchical regression model is a statistical framework that structures data and parameters in multiple interconnected levels. This allows information to be pooled across different groups or clusters. By assigning prior distributions to the parameters of the priors themselves (hyperparameters), hierarchical models effectively capture both within-group and between-group variances. This multi-level structure provides robust parameter estimates, especially for groups with sparse data, by "borrowing strength" from the overall population distribution.
 
@@ -140,7 +149,7 @@ Under this non-informative parameterization, direct composition sampling proceed
 
 ### Raw R Code for Data Analysis
 
-The following section details how the data analysis is executed. We source our primary sampling algorithm from the `raw/src/rawSampler.r` file and apply it directly to the dataset located in `data/data.txt` to generate posterior summaries.
+The following section details how the data analysis is executed. For the R code below, navigate to the directory `src/bayesianLinearRegressionExact/raw/run', where you will find the required `Rmd' and `R' programs to generate this html file. We source our primary sampling algorithm from the `raw/src/rawSampler.r` file and apply it directly to the dataset located in `data/data.txt` to generate posterior summaries.
 
 ```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
 # 1. Source the external sampling function and load required packages

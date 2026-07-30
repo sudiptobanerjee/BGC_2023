@@ -377,8 +377,8 @@ Precision (<span class="math inline">\(M_\theta^{-1}\)</span>)</a></li>
 <li><a href="#composition-sampling-algorithms-for-parameter-inference"><span class="toc-section-number">3</span> Composition Sampling Algorithms for
 Parameter Inference</a>
 <ul>
-<li><a href="#algorithm-1-general-conjugate-prior-case-user-supplies-m_0-1"><span class="toc-section-number">3.1</span> Algorithm 1: General Conjugate
-Prior Case (User Supplies <span class="math inline">\(M_0^{-1}\)</span>)</a></li>
+<li><a href="#algorithm-1-general-conjugate-prior-case"><span class="toc-section-number">3.1</span> Algorithm 1: General Conjugate
+Prior Case</a></li>
 <li><a href="#algorithm-2-non-informative-jeffreys-flat-prior-case"><span class="toc-section-number">3.2</span> Algorithm 2: Non-Informative
 (Jeffreys) Flat Prior Case</a></li>
 </ul></li>
@@ -430,6 +430,16 @@ Conclusion</a></li>
 </ul>
 </div>
 
+<p><em>Note:</em> To generate this HTML file, run
+<code>renderRaw.sh</code> in the terminal from the
+<code>src/bayesianLinearRegressionExact/raw/run</code> directory.
+Alternatively, find the source <code>Rmd</code> and <code>R</code> files
+in that same folder starting from the <code>BGC_2023</code> GitHub
+home.</p>
+<pre class="bash"><code># Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh</code></pre>
+<hr />
 <div id="introduction-and-mathematical-reparameterization" class="section level1" number="1">
 <h1><span class="header-section-number">1</span> Introduction and
 Mathematical Reparameterization</h1>
@@ -502,9 +512,9 @@ preserves numerical precision, and operates in <span class="math inline">\(O(p^3
 <div id="composition-sampling-algorithms-for-parameter-inference" class="section level1" number="3">
 <h1><span class="header-section-number">3</span> Composition Sampling
 Algorithms for Parameter Inference</h1>
-<div id="algorithm-1-general-conjugate-prior-case-user-supplies-m_0-1" class="section level2" number="3.1">
+<div id="algorithm-1-general-conjugate-prior-case" class="section level2" number="3.1">
 <h2><span class="header-section-number">3.1</span> Algorithm 1: General
-Conjugate Prior Case (User Supplies <span class="math inline">\(M_0^{-1}\)</span>)</h2>
+Conjugate Prior Case</h2>
 <p><strong>Inputs:</strong> Response vector <span class="math inline">\(y \in \mathbb{R}^n\)</span>, unscaled design
 matrix <span class="math inline">\(X \in \mathbb{R}^{n \times
 p}\)</span>, prior precision factor <span class="math inline">\(M_0^{-1}
@@ -1403,14 +1413,14 @@ kable(benchmark_df, caption = &quot;Execution Time Benchmarking for 10,000 Draws
 <tr class="odd">
 <td align="left">Simulated Data (n = 250, p = 3)</td>
 <td align="center">0.0050</td>
-<td align="center">0.0090</td>
-<td align="center">0.56x</td>
+<td align="center">0.0080</td>
+<td align="center">0.62x</td>
 </tr>
 <tr class="even">
 <td align="left">Empirical Data (n = 1369, p = 9)</td>
 <td align="center">0.0190</td>
-<td align="center">0.0190</td>
-<td align="center">1.00x</td>
+<td align="center">0.0180</td>
+<td align="center">1.06x</td>
 </tr>
 </tbody>
 </table>

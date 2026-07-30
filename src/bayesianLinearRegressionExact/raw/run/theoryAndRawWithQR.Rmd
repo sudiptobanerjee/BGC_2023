@@ -10,6 +10,17 @@ output:
     number_sections: true
 ---
 
+*Note:* To generate this HTML file, run `renderRaw.sh` in the terminal from the `src/bayesianLinearRegressionExact/raw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh
+```
+
+---
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
@@ -65,7 +76,7 @@ This approach completely eliminates explicit matrix inversions, preserves numeri
 
 # Composition Sampling Algorithms for Parameter Inference
 
-## Algorithm 1: General Conjugate Prior Case (User Supplies $M_0^{-1}$)
+## Algorithm 1: General Conjugate Prior Case 
 
 **Inputs:** Response vector $y \in \mathbb{R}^n$, unscaled design matrix $X \in \mathbb{R}^{n \times p}$, prior precision factor $M_0^{-1} \in \mathbb{R}^{p \times p}$, prior location $m_0 \in \mathbb{R}^{p \times 1}$, Inverse-Gamma hyperparameters $a_0, b_0$, and requested draw count $N$.
 

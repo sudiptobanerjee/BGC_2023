@@ -12,7 +12,7 @@
 <meta name="author" content="Sudipto Banerjee" />
 
 
-<title>Theory of Bayesian Predictions</title>
+<title>Predictive Inference in Bayesian Linear Regression</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -355,14 +355,23 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">Theory of Bayesian Predictions</h1>
+<h1 class="title toc-ignore">Predictive Inference in Bayesian Linear
+Regression</h1>
 <h4 class="author">Sudipto Banerjee</h4>
 
 </div>
 
 
-<div id="bayesian-predictions-from-linear-regression" class="section level2">
-<h2>Bayesian Predictions from Linear Regression</h2>
+<p><em>Note:</em> To generate this HTML file, run
+<code>renderRaw.sh</code> in the terminal from the
+<code>src/bayesianLinearRegressionExact/raw/run</code> directory.
+Alternatively, find the source <code>Rmd</code> and <code>R</code> files
+in that same folder starting from the <code>BGC_2023</code> GitHub
+home.</p>
+<pre class="bash"><code># Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh</code></pre>
+<hr />
 <p>In Bayesian inference, prediction involves obtaining the distribution
 of unobserved outcomes <span class="math inline">\(\tilde{y}\)</span>
 (<span class="math inline">\(m \times 1\)</span>) for a given matrix of
@@ -392,7 +401,6 @@ p(\tilde{y} \mid \theta_{(i)}, y)\)</span></li>
 <li><strong>Return</strong> <span class="math inline">\((\tilde{y}_{(i)})_{i=1,2,\ldots, N}\)</span></li>
 </ol>
 <hr />
-</div>
 </div>
 <div id="prediction-under-independent-errors-v_y-i_n" class="section level2">
 <h2>Prediction under Independent Errors (<span class="math inline">\(V_y

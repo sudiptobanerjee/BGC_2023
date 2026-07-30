@@ -1,10 +1,18 @@
 ---
-title: "Theory of Bayesian Predictions"
+title: " Predictive Inference in Bayesian Linear Regression"
 author: "Sudipto Banerjee"
 output: html_document
 ---
 
-## Bayesian Predictions from Linear Regression
+*Note:* To generate this HTML file, run `renderRaw.sh` in the terminal from the `src/bayesianLinearRegressionExact/raw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh
+```
+
+---
 
 In Bayesian inference, prediction involves obtaining the distribution of unobserved outcomes $\tilde{y}$ ($m \times 1$) for a given matrix of predictor variables $\tilde{X}$ ($m \times p$), conditional on the observed data $y$.
 

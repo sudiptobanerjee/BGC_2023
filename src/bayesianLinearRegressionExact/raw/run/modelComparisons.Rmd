@@ -4,6 +4,16 @@ author: "Sudipto Banerjee"
 output: html_document
 ---
 
+*Note:* To generate this HTML file, run `renderRaw.sh` in the terminal from the `src/bayesianLinearRegressionExact/raw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh
+```
+
+---
+
 Model selection and assessment are central to Bayesian data analysis. The **Watanabe-Akaike Information Criterion (WAIC)**—also known as the *Widely Applicable Information Criterion*—is a fully Bayesian metric for estimating out-of-sample predictive accuracy. Unlike the Akaike Information Criterion (AIC) or Deviance Information Criterion (DIC), WAIC utilizes the full posterior distribution (rather than point estimates) and is valid for complex, non-linear, or singular models.
 
 WAIC is defined on the deviance scale as:

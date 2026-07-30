@@ -12,7 +12,7 @@
 <meta name="author" content="Sudipto Banerjee" />
 
 
-<title>Part 1: Theory and Raw R Code</title>
+<title>Bayesian Linear Regression Using Conjugate Normal-Gamma priors</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -355,12 +355,23 @@ pre code {
 
 
 
-<h1 class="title toc-ignore">Part 1: Theory and Raw R Code</h1>
+<h1 class="title toc-ignore">Bayesian Linear Regression Using Conjugate
+Normal-Gamma priors</h1>
 <h4 class="author">Sudipto Banerjee</h4>
 
 </div>
 
 
+<p><em>Note:</em> To generate this HTML file, run
+<code>renderRaw.sh</code> in the terminal from the
+<code>src/bayesianLinearRegressionExact/raw/run</code> directory.
+Alternatively, find the source <code>Rmd</code> and <code>R</code> files
+in that same folder starting from the <code>BGC_2023</code> GitHub
+home.</p>
+<pre class="bash"><code># Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh</code></pre>
+<hr />
 <p>A Bayesian hierarchical regression model is a statistical framework
 that structures data and parameters in multiple interconnected levels.
 This allows information to be pooled across different groups or
@@ -565,11 +576,12 @@ computational sampling in <code>rawSampler.r</code> and
 </div>
 <div id="raw-r-code-for-data-analysis" class="section level3">
 <h3>Raw R Code for Data Analysis</h3>
-<p>The following section details how the data analysis is executed. We
-source our primary sampling algorithm from the
-<code>raw/src/rawSampler.r</code> file and apply it directly to the
-dataset located in <code>data/data.txt</code> to generate posterior
-summaries.</p>
+<p>The following section details how the data analysis is executed. For
+the R code below, navigate to the directory
+<code>src/bayesianLinearRegressionExact/raw/run&#39;, where you will find the required</code>Rmd’
+and
+<code>R&#39; programs to generate this html file. We source our primary sampling algorithm from the</code>raw/src/rawSampler.r<code>file and apply it directly to the dataset located in</code>data/data.txt`
+to generate posterior summaries.</p>
 <pre class="r"><code># 1. Source the external sampling function and load required packages
 source(&quot;../src/rawSampler.r&quot;)
 library(spBayes) # Required for bayesLMConjugate
