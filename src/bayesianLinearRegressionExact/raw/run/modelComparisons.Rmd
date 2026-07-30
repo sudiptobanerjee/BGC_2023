@@ -1,0 +1,460 @@
+---
+title: "Model Assessment and Comparisons (WAIC)"
+author: "Sudipto Banerjee"
+output: html_document
+---
+
+Model selection and assessment are central to Bayesian data analysis. The **Watanabe-Akaike Information Criterion (WAIC)**—also known as the *Widely Applicable Information Criterion*—is a fully Bayesian metric for estimating out-of-sample predictive accuracy. Unlike the Akaike Information Criterion (AIC) or Deviance Information Criterion (DIC), WAIC utilizes the full posterior distribution (rather than point estimates) and is valid for complex, non-linear, or singular models.
+
+WAIC is defined on the deviance scale as:
+
+$$\text{WAIC} = -2 \left( lppd - p_{\text{WAIC}} \right)$$
+
+where:
+*   $lppd$ is the **log point predictive density**, measuring model fit.
+*   $p_{\text{WAIC}}$ is the **effective number of parameters**, penalizing model complexity.
+
+---
+
+## 1. Exact Closed-Form Derivation of $lppd$
+
+The log point predictive density is defined analytically as:
+
+$$lppd_{\text{exact}} = \sum_{i=1}^n \log p(y_i \mid y) = \sum_{i=1}^n \log \left( \iint p(y_i \mid \beta, \sigma^2) \, p(\beta, \sigma^2 \mid y) \, d\beta \, d\sigma^2 \right)$$
+
+### Posterior Parameters of the Conjugate Model
+
+Under the conjugate prior setup:
+
+$$\begin{aligned}
+\sigma^2 &\sim \text{Inverse-Gamma}(a_0, b_0) \\
+\beta \mid \sigma^2 &\sim \mathcal{N}_p\left(m_0, \, \sigma^2 M_0\right)
+\end{aligned}$$
+
+The joint posterior distribution is Normal-Inverse-Gamma, $p(\beta, \sigma^2 \mid y) = \mathcal{N}_p(\mu_\beta, \sigma^2 M) \times \text{Inverse-Gamma}(a^*, b^*)$, where:
+
+$$\begin{aligned}
+M &= \left(M_0^{-1} + X^\top X\right)^{-1} \\
+\mu_\beta &= M \left(M_0^{-1} m_0 + X^\top y\right) \quad \text{(Posterior mean of } \beta\text{)} \\
+a^* &= a_0 + \frac{n}{2} \\
+b^* &= b_0 + \frac{1}{2} \left[ y^\top y + m_0^\top M_0^{-1} m_0 - \mu_\beta^\top M^{-1} \mu_\beta \right]
+\end{aligned}$$
+
+### Step 1: Conditional Density Given $\sigma^2$
+
+For an in-sample observation $y_i = x_i^\top \beta + \epsilon_i$ (where $x_i^\top$ is the $i$-th row of $X$), conditioning on $\sigma^2$ and integrating over $\beta$ yields:
+
+$$\mathbb{E}[y_i \mid \sigma^2, y] = x_i^\top \mathbb{E}[\beta \mid \sigma^2, y] = x_i^\top \mu_\beta$$
+
+$$\text{Var}(y_i \mid \sigma^2, y) = x_i^\top \text{Var}(\beta \mid \sigma^2, y) x_i + \sigma^2 = \sigma^2 \left(1 + x_i^\top M x_i\right)$$
+
+Letting $h_i = 1 + x_i^\top M x_i$ (a leverage factor reflecting posterior covariance on observation $i$), the conditional distribution is:
+
+$$y_i \mid \sigma^2, y \sim \mathcal{N}\left(x_i^\top \mu_\beta, \, \sigma^2 h_i\right)$$
+
+### Step 2: Marginalizing Out Variance $\sigma^2$
+
+Marginalizing $y_i$ over the Inverse-Gamma posterior $p(\sigma^2 \mid y) = \frac{(b^*)^{a^*}}{\Gamma(a^*)} (\sigma^2)^{-(a^* + 1)} \exp\left(-\frac{b^*}{\sigma^2}\right)$:
+
+$$p(y_i \mid y) = \int_0^\infty \frac{1}{\sqrt{2\pi \sigma^2 h_i}} \exp\left( -\frac{(y_i - x_i^\top \mu_\beta)^2}{2 \sigma^2 h_i} \right) \frac{(b^*)^{a^*}}{\Gamma(a^*)} (\sigma^2)^{-(a^* + 1)} \exp\left(-\frac{b^*}{\sigma^2}\right) d\sigma^2$$
+
+Combining powers of $\sigma^2$ and exponential terms inside the integral:
+
+$$p(y_i \mid y) = \frac{(b^*)^{a^*}}{\Gamma(a^*) \sqrt{2\pi h_i}} \int_0^\infty (\sigma^2)^{-\left(a^* + \frac{1}{2} + 1\right)} \exp\left( -\frac{1}{\sigma^2} \left[ b^* + \frac{(y_i - x_i^\top \mu_\beta)^2}{2 h_i} \right] \right) d\sigma^2$$
+
+Recognizing the kernel of an Inverse-Gamma distribution with shape $a^* + \frac{1}{2}$ and scale $b^* + \frac{(y_i - x_i^\top \mu_\beta)^2}{2 h_i}$, the integral evaluates to:
+
+$$p(y_i \mid y) = \frac{(b^*)^{a^*}}{\Gamma(a^*) \sqrt{2\pi h_i}} \cdot \frac{\Gamma\left(a^* + \frac{1}{2}\right)}{\left[ b^* + \frac{(y_i - x_i^\top \mu_\beta)^2}{2 h_i} \right]^{a^* + \frac{1}{2}}}$$
+
+Rearranging terms:
+
+$$p(y_i \mid y) = \frac{\Gamma\left(a^* + \frac{1}{2}\right)}{\Gamma(a^*) \sqrt{2\pi b^* h_i}} \left( 1 + \frac{(y_i - x_i^\top \mu_\beta)^2}{2 b^* h_i} \right)^{-\left(a^* + \frac{1}{2}\right)}$$
+
+This corresponds exactly to a non-standardized **univariate Student's $t$-distribution** $t_{\nu}(\mu_i, s_i^2)$ with:
+*   Degrees of freedom: $\nu = 2a^*$
+*   Location parameter: $\mu_i = x_i^\top \mu_\beta$
+*   Scale parameter squared: $s_i^2 = \frac{b^*}{a^*} h_i = \frac{b^*}{a^*}\left(1 + x_i^\top M x_i\right)$
+
+### Step 3: Exact Closed-Form $lppd$ Formula
+
+Taking the natural logarithm and summing over all $n$ observations gives the exact analytical formula:
+
+$$lppd_{\text{exact}} = \sum_{i=1}^n \left[ \log \Gamma\left(a^* + \frac{1}{2}\right) - \log \Gamma(a^*) - \frac{1}{2} \log\left(2\pi b^* h_i\right) - \left(a^* + \frac{1}{2}\right) \log\left( 1 + \frac{(y_i - x_i^\top \mu_\beta)^2}{2 b^* h_i} \right) \right]$$
+
+---
+
+## 2. Exact Closed-Form Derivation of $p_{\text{WAIC}}$
+
+While $p_{\text{WAIC}}$ is typically evaluated via sample statistics, for conjugate Bayesian linear regression it can also be calculated in **exact closed form** using the Law of Total Variance over the posterior parameters $(\beta, \sigma^2)$.
+
+We evaluate the posterior variance of the log-likelihood for observation $i$:
+
+$$\text{Var}_{\beta, \sigma^2 \mid y}(LL_i) = \text{Var}_{\beta, \sigma^2 \mid y} \left( -\frac{1}{2}\log(2\pi) - \frac{1}{2}\log\sigma^2 - \frac{(y_i - x_i^\top \beta)^2}{2\sigma^2} \right)$$
+
+Let $e_i = y_i - x_i^\top \mu_\beta$ denote the posterior mean residual and $k_i = x_i^\top M x_i$ denote the leverage of observation $i$.
+
+### Step 1: Conditioning on $\sigma^2$ (Inner Moments)
+
+For a fixed $\sigma^2$, the conditional distribution is $y_i - x_i^\top \beta \sim \mathcal{N}(e_i, \sigma^2 k_i)$:
+
+1.  **Conditional Expectation:**
+    $$\mathbb{E}_{\beta \mid \sigma^2, y}[LL_i] = -\frac{1}{2}\log(2\pi) - \frac{1}{2}\log\sigma^2 - \frac{e_i^2 + \sigma^2 k_i}{2\sigma^2} = -\frac{1}{2}\log(2\pi) - \frac{1}{2}\log\sigma^2 - \frac{e_i^2}{2\sigma^2} - \frac{k_i}{2}$$
+
+2.  **Conditional Variance:**
+    Using the variance property of non-central chi-squared quadratic forms $\text{Var}\left((y_i - x_i^\top \beta)^2\right) = 2(\sigma^2 k_i)^2 + 4(\sigma^2 k_i)e_i^2$:
+    $$\text{Var}_{\beta \mid \sigma^2, y}(LL_i) = \frac{1}{4\sigma^4} \left[ 2\sigma^4 k_i^2 + 4\sigma^2 k_i e_i^2 \right] = \frac{k_i^2}{2} + \frac{k_i e_i^2}{\sigma^2}$$
+
+### Step 2: Applying the Law of Total Variance over $\sigma^2 \mid y$
+
+$$\text{Var}_{\beta, \sigma^2 \mid y}(LL_i) = \underbrace{\mathbb{E}_{\sigma^2 \mid y}\left[ \text{Var}_{\beta \mid \sigma^2, y}(LL_i) \right]}_{\text{Term 1}} + \underbrace{\text{Var}_{\sigma^2 \mid y}\left( \mathbb{E}_{\beta \mid \sigma^2, y}[LL_i] \right)}_{\text{Term 2}}$$
+
+#### Evaluating Term 1:
+Using $\mathbb{E}\left[\frac{1}{\sigma^2}\right] = \frac{a^*}{b^*}$ under $\sigma^2 \mid y \sim \text{Inverse-Gamma}(a^*, b^*)$:
+$$\text{Term 1} = \mathbb{E}_{\sigma^2 \mid y}\left[ \frac{k_i^2}{2} + \frac{k_i e_i^2}{\sigma^2} \right] = \frac{k_i^2}{2} + \frac{a^* k_i e_i^2}{b^*}$$
+
+#### Evaluating Term 2:
+Expanding the variance of the conditional expectation:
+$$\text{Term 2} = \text{Var}_{\sigma^2 \mid y}\left( -\frac{1}{2}\log\sigma^2 - \frac{e_i^2}{2\sigma^2} \right) = \frac{1}{4}\text{Var}(\log\sigma^2) + \frac{e_i^4}{4}\text{Var}\left(\frac{1}{\sigma^2}\right) + \frac{e_i^2}{2}\text{Cov}\left(\log\sigma^2, \frac{1}{\sigma^2}\right)$$
+
+Under precision $\tau = \frac{1}{\sigma^2} \sim \text{Gamma}(a^*, b^*)$:
+*   $\text{Var}(\log\sigma^2) = \text{Var}(\log\tau) = \psi^{(1)}(a^*)$ &nbsp;&nbsp; *(where $\psi^{(1)}$ is the **trigamma function**)*
+*   $\text{Var}\left(\frac{1}{\sigma^2}\right) = \text{Var}(\tau) = \frac{a^*}{(b^*)^2}$
+*   $\text{Cov}\left(\log\sigma^2, \frac{1}{\sigma^2}\right) = \text{Cov}(-\log\tau, \tau) = -\frac{1}{b^*}$
+
+Substituting these exact identities into Term 2:
+$$\text{Term 2} = \frac{1}{4} \psi^{(1)}(a^*) + \frac{a^* e_i^4}{4 (b^*)^2} - \frac{e_i^2}{2 b^*}$$
+
+### Step 3: Exact Closed-Form $p_{\text{WAIC}}$ Formula
+
+Combining **Term 1** and **Term 2** yields the exact pointwise log-likelihood variance:
+
+$$\text{Var}(LL_i) = \frac{k_i^2}{2} + \frac{a^* k_i e_i^2}{b^*} + \frac{1}{4} \psi^{(1)}(a^*) + \frac{a^* e_i^4}{4 (b^*)^2} - \frac{e_i^2}{2 b^*}$$
+
+Summing over all $n$ observations provides the exact analytical effective number of parameters:
+
+$$p_{\text{WAIC}, \text{exact}} = \sum_{i=1}^n \left[ \frac{k_i^2}{2} + \frac{a^* k_i e_i^2}{b^*} + \frac{1}{4} \psi^{(1)}(a^*) + \frac{a^* e_i^4}{4 (b^*)^2} - \frac{e_i^2}{2 b^*} \right]$$
+
+Thus, the **exact closed-form WAIC** is given by:
+
+$$\text{WAIC}_{\text{exact}} = -2 \left( lppd_{\text{exact}} - p_{\text{WAIC}, \text{exact}} \right)$$
+
+---
+
+## 3. Sample-Based Computation of WAIC
+
+When using posterior draws $\theta^{(s)} = \left(\beta^{(s)}, \sigma^{2(s)}\right)$ for $s = 1, \ldots, N$, WAIC is evaluated empirically using the **pointwise log-likelihood matrix** $LL \in \mathbb{R}^{n \times N}$.
+
+The log-likelihood entry for observation $i$ under draw $s$ is:
+
+$$LL_{i,s} = \log p\left(y_i \mid \beta^{(s)}, \sigma^{2(s)}\right) = -\frac{1}{2} \log\left(2\pi \sigma^{2(s)}\right) - \frac{\left(y_i - x_i^\top \beta^{(s)}\right)^2}{2 \sigma^{2(s)}}$$
+
+### Pointwise Predictive Density ($lppd_{\text{sample}}$)
+
+The sample-based estimate averages likelihoods across all MCMC draws prior to taking the logarithm:
+
+$$lppd_{\text{sample}} = \sum_{i=1}^n \log \left( \frac{1}{N} \sum_{s=1}^N p\left(y_i \mid \beta^{(s)}, \sigma^{2(s)}\right) \right) = \sum_{i=1}^n \log \left( \frac{1}{N} \sum_{s=1}^N \exp\left(LL_{i,s}\right) \right)$$
+
+### Model Complexity Penalty ($p_{\text{WAIC}}$)
+
+The empirical effective number of parameters ($p_{\text{WAIC}, 2}$) calculates the sample variance of the log-likelihood across posterior draws for each observation $i$:
+
+$$p_{\text{WAIC}} = \sum_{i=1}^n V_{s=1}^N \left( LL_{i,s} \right)$$
+
+where the operator $V_{s=1}^N \left( LL_{i,s} \right)$ represents the sample variance for observation $i$:
+
+$$V_{s=1}^N \left( LL_{i,s} \right) = \frac{1}{N - 1} \sum_{s=1}^N \left( LL_{i,s} - \bar{LL}_i \right)^2$$
+
+and $\bar{LL}_i = \frac{1}{N} \sum_{s=1}^N LL_{i,s}$ is the sample mean log-likelihood for observation $i$.
+
+---
+
+## 4. Numerical Stability: The Log-Sum-Exp Trick
+
+Computing $\log \left( \frac{1}{N} \sum_{s=1}^N \exp(LL_{i,s}) \right)$ directly in standard floating-point arithmetic easily causes **numerical underflow** (if $LL_{i,s}$ values are highly negative, $\exp(LL_{i,s}) \to 0$) or **overflow**.
+
+To ensure numerical stability, we apply the **Log-Sum-Exp identity**:
+
+Let $c_i = \max_{s \in \{1, \ldots, N\}} LL_{i,s}$.
+
+$$\begin{aligned}
+\log \left( \frac{1}{N} \sum_{s=1}^N \exp(LL_{i,s}) \right) &= \log \left( \frac{1}{N} \exp(c_i) \sum_{s=1}^N \exp(LL_{i,s} - c_i) \right) \\
+&= c_i - \log(N) + \log \left( \sum_{s=1}^N \exp\left(LL_{i,s} - c_i\right) \right)
+\end{aligned}$$
+
+Because $LL_{i,s} - c_i \le 0$, the exponential terms $\exp(LL_{i,s} - c_i)$ are strictly bounded in $(0, 1]$, completely eliminating overflow and preventing underflow for all dominant posterior draws.
+
+---
+
+```{r waic_demonstration, message=FALSE, warning=FALSE}
+# -----------------------------------------------------------------------------
+# 1. Source Libraries & Routines
+# -----------------------------------------------------------------------------
+source("../src/rawSampler.r")
+source("../src/modelComparisons.r")
+
+# -----------------------------------------------------------------------------
+# 2. Load Data and Setup Model Matrices
+# -----------------------------------------------------------------------------
+dataset <- read.table("../../data/data.txt", header = TRUE)
+
+y_train <- dataset[, 1]
+X_train_raw <- as.matrix(dataset[, -1])
+
+X_train <- cbind(Intercept = 1, scale(X_train_raw))
+n <- nrow(X_train)
+p <- ncol(X_train)
+
+# Prior specifications
+m0     <- matrix(0, p, 1)
+M0_inv <- matrix(0, p, p)  # Non-informative prior precision
+a0     <- -p / 2
+b0     <- 0
+N_draws <- 10000
+
+# -----------------------------------------------------------------------------
+# 3. Fit Model & Generate Posterior Draws
+# -----------------------------------------------------------------------------
+set.seed(42)
+posterior <- rawSampler(
+  y = y_train, 
+  X = X_train, 
+  m0 = m0, 
+  M0_inv = M0_inv, 
+  a0 = a0, 
+  b0 = b0, 
+  N = N_draws
+)
+
+beta_draws   <- posterior$draws[, 1:p]
+sigma2_draws <- posterior$draws[, "sigma2"]
+
+# -----------------------------------------------------------------------------
+# 4. Method (i): Exact Analytical WAIC
+# -----------------------------------------------------------------------------
+res_exact <- waic_exact(
+  X = X_train, 
+  y = y_train, 
+  m0 = m0, 
+  M0_inv = M0_inv, 
+  a0 = a0, 
+  b0 = b0
+)
+
+# -----------------------------------------------------------------------------
+# 5. Method (ii): Raw Sample-Based WAIC (with Log-Sum-Exp Trick)
+# -----------------------------------------------------------------------------
+LL_matrix <- compute_log_likelihood_matrix(
+  X = X_train, 
+  y = y_train, 
+  beta_draws = beta_draws, 
+  sigma2_draws = sigma2_draws
+)
+
+res_sample <- waic_sample(LL_matrix)
+
+# -----------------------------------------------------------------------------
+# 6. Method (iii): 'loo' Package WAIC
+# -----------------------------------------------------------------------------
+res_loo <- waic_loo_package(LL_matrix)
+
+# -----------------------------------------------------------------------------
+# 7. Print Comparative Performance Summary
+# -----------------------------------------------------------------------------
+comparison_df <- data.frame(
+  Metric = c("lppd (Log Predictive Density)", "p_WAIC (Effective Parameters)", "WAIC (Deviance Scale)"),
+  `Exact_Analytical` = c(res_exact$lppd, res_exact$p_waic, res_exact$waic),
+  `Raw_Sample_MCMC`  = c(res_sample$lppd, res_sample$p_waic, res_sample$waic),
+  `LOO_Package`       = c(res_loo$lppd, res_loo$p_waic, res_loo$waic),
+  `Abs_Diff_(Exact_vs_Sample)` = c(
+    abs(res_exact$lppd - res_sample$lppd),
+    abs(res_exact$p_waic - res_sample$p_waic),
+    abs(res_exact$waic - res_sample$waic)
+  )
+)
+
+knitr::kable(
+  comparison_df, 
+  digits = 4, 
+  col.names = c("Metric", "Exact Analytical", "Raw Sample (Log-Sum-Exp)", "loo Package", "Abs Diff (Exact vs Raw)"),
+  caption = "Comparison of WAIC Calculations across Analytical, Sample-Based, and 'loo' Methods"
+)
+```
+---
+
+## 5. Sequential Model Comparison & Visualization
+
+To observe how $lppd$, $p_{\text{WAIC}}$, and total $\text{WAIC}$ evolve as parameters are added, we evaluate a sequence of nested Bayesian regression models:
+
+*   **$M_0$**: Intercept only ($\beta_0$)
+*   **$M_1$**: Intercept + $X_1$
+*   **$M_2$**: Intercept + $X_1 + X_2$
+*   $\vdots$
+*   **$M_p$**: Full model with all $p$ predictors
+
+Because $p_{\text{WAIC}, \text{exact}}$ and $lppd_{\text{exact}}$ give closed-form results instantly, we compute the exact metrics across all model sub-structures.
+
+```{r sequential_model_comparison, message=FALSE, warning=FALSE, fig.width=10, fig.height=7}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# -----------------------------------------------------------------------------
+# 1. Fit Sequential Models M_0 to M_p
+# -----------------------------------------------------------------------------
+num_features <- ncol(X_train_raw)
+model_results <- vector("list", num_features + 1)
+
+for (k in 0:num_features) {
+  if (k == 0) {
+    X_k <- X_train[, 1, drop = FALSE] # Intercept only
+    model_label <- "M0 (Intercept)"
+  } else {
+    X_k <- X_train[, 1:(k + 1), drop = FALSE] # Intercept + X1 + ... + Xk
+    model_label <- paste0("M", k, " (+X", k, ")")
+  }
+  
+  p_k <- ncol(X_k)
+  
+  # Hyperparameters for subset model k
+  m0_k     <- matrix(0, p_k, 1)
+  M0_inv_k <- matrix(0, p_k, p_k)
+  a0_k     <- -p_k / 2
+  b0_k     <- 0
+  
+  # Exact WAIC calculation
+  res_k <- waic_exact(
+    X = X_k, 
+    y = y_train, 
+    m0 = m0_k, 
+    M0_inv = M0_inv_k, 
+    a0 = a0_k, 
+    b0 = b0_k
+  )
+  
+  model_results[[k + 1]] <- data.frame(
+    Model_Index = k,
+    Model       = model_label,
+    Num_Params  = p_k + 1,  # p_k regression coefficients + 1 variance
+    lppd        = res_k$lppd,
+    p_waic      = res_k$p_waic,
+    WAIC        = res_k$waic
+  )
+}
+
+seq_df <- bind_rows(model_results)
+
+# -----------------------------------------------------------------------------
+# 2. Display Model Assessment Table
+# -----------------------------------------------------------------------------
+best_model_idx <- which.min(seq_df$WAIC)
+
+knitr::kable(
+  seq_df,
+  digits = 3,
+  col.names = c("Index", "Model Structure", "True Params (p+1)", "lppd (Fit)", "p_WAIC (Penalty)", "WAIC (Deviance)"),
+  caption = "Sequential Bayesian Model Assessment (Closed-Form Exact WAIC)"
+)
+
+# -----------------------------------------------------------------------------
+# 3. Plot A: Faceted Metrics Overview
+# -----------------------------------------------------------------------------
+df_long <- seq_df %>%
+  pivot_longer(
+    cols = c("lppd", "p_waic", "WAIC"),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  mutate(
+    Metric_Label = factor(
+      Metric,
+      levels = c("WAIC", "lppd", "p_waic"),
+      labels = c("WAIC (Lower is Better)", "lppd (Higher Fit is Better)", "p_WAIC (Penalty)")
+    ),
+    Model = factor(Model, levels = seq_df$Model)
+  )
+
+p1 <- ggplot(df_long, aes(x = Model, y = Value, group = Metric_Label, color = Metric_Label)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  facet_wrap(~ Metric_Label, scales = "free_y", ncol = 1) +
+  scale_color_manual(values = c("WAIC (Lower is Better)" = "#d95f02", 
+                               "lppd (Higher Fit is Better)" = "#2b5c8f", 
+                               "p_WAIC (Penalty)" = "#7570b3")) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 11),
+    axis.text.x = element_text(angle = 35, hjust = 1, color = "black"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", size = 14)
+  ) +
+  labs(
+    title = "Sequential Model Comparison Profile",
+    subtitle = "Tracking Model Fit (lppd), Complexity Penalty (p_WAIC), and Overall Criterion (WAIC)",
+    x = "Model Sequence",
+    y = "Metric Value"
+  )
+
+print(p1)
+```
+
+### Methodological Note: How WAIC Estimates Out-of-Sample Performance
+
+A fundamental challenge in statistical modeling is evaluating how well a model will generalize to *new, unseen data* ($y^{\text{rep}}$) drawn from the true data-generating process $f(y)$. 
+
+Evaluating predictive accuracy directly on training data yields an overly optimistic assessment because the posterior distribution is optimized using those exact same observations. While cross-validation addresses this by physically partitioning the data (holding out subsets), WAIC estimates out-of-sample predictive accuracy analytically using **within-sample pointwise posterior distributions**:
+
+1. **In-Sample Fit ($lppd$):** Evaluates total predictive accuracy across observed data points, integrated over the posterior distribution $p(\theta \mid y)$.
+2. **Optimism Penalty ($p_{\text{WAIC}}$):** Quantifies overoptimism by measuring the pointwise posterior variance of the log-likelihood for each observation. This acts as an automated, data-driven measure of effective model complexity.
+
+By adjusting the in-sample predictive density for overoptimism, WAIC yields an asymptotically unbiased estimate of expected out-of-sample log predictive density ($\text{elpd}_{\text{out}}$) mapped onto the deviance scale:
+
+$$\text{WAIC} = -2 \cdot \widehat{\text{elpd}}_{\text{out}} = -2 \left( lppd - p_{\text{WAIC}} \right)$$
+
+#### The Sequential Trade-Off Mechanism
+When evaluating nested models ($M_0 \subset M_1 \subset \dots \subset M_p$):
+* **Model Fit ($lppd$):** Strictly improves (or non-decreases) as predictors are added, as additional parameters allow the model to fit training observations more tightly.
+* **Complexity Penalty ($p_{\text{WAIC}}$):** Increases as parameters are added, reflecting increased parameter variance across higher dimensions.
+
+The WAIC trajectory plots this dynamic trade-off across the sequence. Underfit models suffer from poor $lppd$ fit, while overfit models incur large $p_{\text{WAIC}}$ penalties. The minimum point on the WAIC curve identifies the model structure predicted to minimize out-of-sample prediction error.
+
+```{r waic_trajectory_plot, message=FALSE, warning=FALSE, fig.width=10, fig.height=5.5}
+# -----------------------------------------------------------------------------
+# 4. Plot B: Focused WAIC Trajectory Plot with Minimum Highlight
+# -----------------------------------------------------------------------------
+p2 <- ggplot(seq_df, aes(x = factor(Model, levels = Model), y = WAIC, group = 1)) +
+  geom_line(color = "#2b5c8f", linewidth = 1.2) +
+  geom_point(color = "#2b5c8f", size = 3.5) +
+  # Highlight optimal model point
+  geom_point(
+    data = seq_df[best_model_idx, ],
+    aes(x = factor(Model, levels = Model), y = WAIC),
+    color = "#d95f02", size = 5
+  ) +
+  annotate(
+    "text",
+    x = best_model_idx,
+    y = seq_df$WAIC[best_model_idx] + (max(seq_df$WAIC) - min(seq_df$WAIC)) * 0.06,
+    label = paste0("Optimal Model: ", seq_df$Model[best_model_idx]),
+    color = "#d95f02", fontface = "bold", size = 3.8
+  ) +
+  # Add vertical expansion & prevent text clipping
+  scale_y_continuous(expand = expansion(mult = c(0.08, 0.18))) +
+  coord_cartesian(clip = "off") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 35, hjust = 1, color = "black"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", size = 14),
+    plot.margin = margin(t = 15, r = 20, b = 10, l = 10)
+  ) +
+  labs(
+    title = "Out-of-Sample Predictive Trajectory (WAIC)",
+    subtitle = "Orange highlight indicates the model minimizing out-of-sample deviance",
+    x = "Model Sub-Structure",
+    y = "WAIC Score"
+  )
+
+print(p2)
+```
+

@@ -1,0 +1,251 @@
+---
+title: "Part 1: Theory and Raw R Code"
+author: "Sudipto Banerjee"
+output: html_document
+---
+
+
+A Bayesian hierarchical regression model is a statistical framework that structures data and parameters in multiple interconnected levels. This allows information to be pooled across different groups or clusters. By assigning prior distributions to the parameters of the priors themselves (hyperparameters), hierarchical models effectively capture both within-group and between-group variances. This multi-level structure provides robust parameter estimates, especially for groups with sparse data, by "borrowing strength" from the overall population distribution.
+
+## Conjugate Bayesian (General) Linear Regression
+
+*   A general conjugate Bayesian linear model, where $X$ is an $n \times p$ matrix:
+$$\begin{align*} y \mid \beta,\sigma^2, X &\sim N(X\beta, \sigma^2 V_y)\\ \beta \mid \sigma^2 &\sim N(M_0m_0, \sigma^2 M_0)\\ \sigma^2 &\sim IG(a_0,b_0) \end{align*}$$
+
+*   $V_y$, $m_0$, $M_0$, $a_0$ and $b_0$ are assumed fixed.
+
+*   Unknown parameters include the regression parameters and the variance, i.e., $\theta = \{\beta, \sigma^2\}$. 
+
+*   We assume $X$ is observed without error and all inference is conditional on $X$.
+
+*   The posterior density $p(\theta \mid y) \propto p(\theta, y)$:
+$$IG(\sigma^2 \mid a_0,b_0) \times N(\beta \mid M_0 m_0, \sigma^2 M_0) \times N(y \mid X\beta, \sigma^2 V_{y})$$
+
+*   Expanding and completing the square, the joint posterior density can be written as (see theoretical derivations below):
+$$p(\beta,\sigma^2 \mid y) \propto \begin{array}{ccc} \underbrace{IG(\sigma^2 \mid a^*, b^*)} & \times & \underbrace{N\left(\beta \mid Mm, \sigma^2 M\right)}\\ p(\sigma^2 \mid y) & & p(\beta \mid \sigma^2, y) \end{array}$$
+where:
+$$a^* = a_0 + \frac{n}{2} \quad ; \quad b^* = b_0 + \frac{1}{2}\left(m_0^{\top}M_0m_0 + y^{\top}V_y^{-1}y - m^{\top}Mm\right)$$
+$$m = m_0 + X^{\top}V_y^{-1}y \quad ; \quad M^{-1} = M_0^{-1} + X^{\top} V_y^{-1} X$$
+
+---
+
+**Algorithm 1:** Exact posterior sampling from $p(\beta, \sigma^2 \mid y)$
+
+1. **For** $i$ in $1:N$:
+2. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\sigma^2_{(i)} \sim IG(a^*,b^*)$
+3. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\beta_{(i)} \sim N\left(Mm, \sigma^2_{(i)}M\right)$
+4. **EndFor**
+5. **Return** $\left(\sigma^2_{(i)}, \beta_{(i)}\right)_{i=1,2,\ldots, N}$
+
+---
+
+### Theoretical Derivations: $p(\beta,\sigma^2\mid y) \propto p(\beta \mid \sigma^2, y) \times p(\sigma^2 \mid y)$
+
+To derive the expressions for the joint posterior, we multiply the likelihood of the data by the prior distributions for $\beta$ and $\sigma^2$.
+
+**1. Setup the Likelihood and Priors**
+*   **Likelihood:** Assuming a general covariance structure $V_y$, the likelihood is:
+    $$p(y \mid \beta, \sigma^2) \propto (\sigma^2)^{-n/2} \exp\left( -\frac{1}{2\sigma^2} (y - X\beta)^{\top} V_y^{-1} (y - X\beta) \right)$$
+*   **Priors:** The conjugate priors are an Inverse-Gamma for $\sigma^2$ and a conditional Normal for $\beta$ (with prior mean $M_0m_0$ and covariance $\sigma^2 M_0$):
+    $$p(\sigma^2) \propto (\sigma^2)^{-(a_0 + 1)} \exp\left( -\frac{b_0}{\sigma^2} \right)$$
+    $$p(\beta \mid \sigma^2) \propto (\sigma^2)^{-p/2} \exp\left( -\frac{1}{2\sigma^2} (\beta - M_0m_0)^{\top} M_0^{-1} (\beta - M_0m_0) \right)$$
+
+**2. Formulate the Joint Posterior**
+By Bayes' theorem, $p(\beta, \sigma^2 \mid y) \propto p(y \mid \beta, \sigma^2) p(\beta \mid \sigma^2) p(\sigma^2)$. Multiplying the terms and grouping the powers of $\sigma^2$ and the exponential terms yields:
+$$p(\beta, \sigma^2 \mid y) \propto (\sigma^2)^{-(a_0 + \frac{n}{2} + \frac{p}{2} + 1)} \exp\left( -\frac{1}{\sigma^2} \left[ b_0 + \frac{1}{2} Q(\beta) \right] \right)$$
+where the quadratic term $Q(\beta)$ aggregates all terms inside the exponentials:
+$$Q(\beta) = (y - X\beta)^{\top} V_y^{-1} (y - X\beta) + (\beta - M_0m_0)^{\top} M_0^{-1} (\beta - M_0m_0)$$
+
+---
+
+#### Multivariate Completion of Squares (Ellipsoidal Rectification)
+
+Before expanding and simplifying $Q(\beta)$, recall the general vector identity for multivariate completion of squares:
+
+$$\beta^{\top}M^{-1}\beta - 2\beta^{\top}m = (\beta - Mm)^{\top}M^{-1}(\beta - Mm) - m^{\top}Mm$$
+
+This identity can be easily verified by expanding the right-hand side. 
+
+Alternatively, if the right-hand form is unknown a priori, assume a centered quadratic form and solve for the unknown coefficients. That is, write:
+$$\beta^{\top}M^{-1}\beta - 2\beta^{\top}m = (\beta - a)^{\top}B(\beta - a) + d$$
+where $a$ is a vector, $B$ is a symmetric matrix, and $d$ is a scalar parameter. Expanding the right-hand side yields:
+$$\beta^{\top}M^{-1}\beta - 2\beta^{\top}m = \beta^{\top}B\beta - 2\beta^{\top}Ba + a^{\top}Ba + d$$
+Comparing coefficients on both sides leads directly to:
+$$\begin{aligned} B &= M^{-1} \\ Ba &= m \implies a = B^{-1}m = Mm \\ a^{\top}Ba + d &= 0 \implies d = -a^{\top}Ba = -m^{\top}Mm \end{aligned}$$
+
+---
+
+**3. Complete the Square for $\beta$**
+To find $p(\beta \mid \sigma^2, y)$, we isolate $\beta$ in $Q(\beta)$ by expanding the terms:
+$$Q(\beta) = (y^{\top}V_y^{-1}y - 2\beta^{\top}X^{\top}V_y^{-1}y + \beta^{\top}X^{\top}V_y^{-1}X\beta) + (\beta^{\top}M_0^{-1}\beta - 2\beta^{\top}M_0^{-1}M_0m_0 + (M_0m_0)^{\top}M_0^{-1}M_0m_0)$$
+Simplifying the prior terms (since $M_0^{-1}M_0 = I$):
+$$Q(\beta) = \beta^{\top}\underbrace{(X^{\top} V_y^{-1} X + M_0^{-1})}_{M^{-1}}\beta - 2\beta^{\top}\underbrace{(X^{\top} V_y^{-1} y + m_0)}_{m} + y^{\top} V_y^{-1} y + m_0^{\top} M_0 m_0$$
+Let us define the posterior precision and mean parameters as provided in the outline:
+$$M^{-1} = M_0^{-1} + X^{\top} V_y^{-1} X \quad ; \quad m = m_0 + X^{\top} V_y^{-1} y$$
+Substituting these into $Q(\beta)$ allows us to complete the square using the identity above. Note that the posterior mean is $Mm$:
+$$Q(\beta) = \beta^{\top}M^{-1}\beta - 2\beta^{\top}m + y^{\top} V_y^{-1} y + m_0^{\top} M_0 m_0$$
+$$Q(\beta) = (\beta - Mm)^{\top} M^{-1} (\beta - Mm) - (Mm)^{\top} M^{-1} (Mm) + y^{\top} V_y^{-1} y + m_0^{\top} M_0 m_0$$
+Since $(Mm)^{\top}M^{-1}(Mm) = m^{\top}M^{\top}M^{-1}Mm = m^{\top}Mm$, we have:
+$$Q(\beta) = (\beta - Mm)^{\top} M^{-1} (\beta - Mm) - m^{\top} Mm + y^{\top} V_y^{-1} y + m_0^{\top} M_0 m_0$$
+
+**4. Separate into Conditional and Marginal Distributions**
+Now, substitute the completed square back into the joint posterior:
+$$p(\beta, \sigma^2 \mid y) \propto \underbrace{(\sigma^2)^{-\frac{p}{2}} \exp\left( -\frac{1}{2\sigma^2} (\beta - Mm)^{\top} M^{-1} (\beta - Mm) \right)}_{\propto \text{ } p(\beta \mid \sigma^2, y) \text{ } \sim \text{ } N(Mm, \sigma^2 M)} \times \underbrace{(\sigma^2)^{-(a_0 + \frac{n}{2} + 1)} \exp\left( -\frac{1}{\sigma^2} \left[ b_0 + \frac{1}{2} \left( m_0^{\top} M_0 m_0 + y^{\top} V_y^{-1} y - m^{\top}Mm \right) \right] \right)}_{\propto \text{ } p(\sigma^2 \mid y) \text{ } \sim \text{ } IG(a^*, b^*)}$$
+
+This perfectly separates the joint posterior into the product $p(\beta \mid \sigma^2, y) \times p(\sigma^2 \mid y)$, proving the updated parameters:
+$$a^* = a_0 + \frac{n}{2}$$
+$$b^* = b_0 + \frac{1}{2}\left(m_0^{\top}M_0 m_0 + y^{\top}V_y^{-1}y - m^{\top}Mm\right)$$
+
+## Non-Informative (Jeffreys) Prior as a Special Case
+
+To analyze the data without imposing subjective prior information, we can instantiate the general conjugate posterior framework established above using the standard non-informative (Jeffreys) prior for the normal linear regression model. We assume $V_y = I_n$, the $n\times n$ identity matrix.
+
+### The Non-Informative Prior Specification
+
+Recall that the general conjugate prior for $(\beta, \sigma^2)$ is the Normal-Inverse-Gamma distribution $\text{N-IG}(m_0, M_0^{-1}, a_0, b_0)$:
+
+$$p(\beta, \sigma^2) \propto (\sigma^2)^{-\left(a_0 + \frac{p}{2} + 1\right)} \exp\left( -\frac{1}{\sigma^2} \left[ b_0 + \frac{1}{2}(\beta - m_0)^\top M_0^{-1} (\beta - m_0) \right] \right)$$
+
+To recover the classic completely uninformative Jeffreys prior $p(\beta, \sigma^2) \propto \frac{1}{\sigma^2}$, we set the hyperparameter values to:
+
+*   **Precision matrix:** $M_0^{-1} = 0_{p \times p}$ (infinite prior variance / flat prior on $\beta$)
+*   **Scale parameter:** $b_0 = 0$
+*   **Shape parameter:** $a_0 = -\frac{p}{2}$
+
+Substituting these choices into the general conjugate prior density verifies:
+
+$$p(\beta, \sigma^2) \propto (\sigma^2)^{-\left(-\frac{p}{2} + \frac{p}{2} + 1\right)} \exp(0) = \frac{1}{\sigma^2}$$
+
+### Simplification of Posterior Parameters
+
+Applying these specific hyperparameters to our general posterior parameter update formulas derived in Section 4 yields the simplified closed-form expressions:
+
+$$\begin{aligned} M_n^{-1} &= M_0^{-1} + X^\top X = X^\top X \\ m_n &= M_n \left( M_0^{-1} m_0 + X^\top y \right) = (X^\top X)^{-1} X^\top y = \hat{\beta} \\ a_n &= a_0 + \frac{n}{2} = \frac{n - p}{2} \\ b_n &= b_0 + \frac{1}{2}\left[ y^\top y + m_0^\top M_0^{-1} m_0 - m_n^\top M_n^{-1} m_n \right] = \frac{1}{2}\left[ y^\top y - \hat{\beta}^\top X^\top X \hat{\beta} \right] = \frac{1}{2}\text{SSE} \end{aligned}$$
+
+where $\hat{\beta}$ is the Ordinary Least Squares (OLS) estimator and $\text{SSE} = (y - X\hat{\beta})^\top (y - X\hat{\beta})$ is the residual sum of squares.
+
+### Sampling Scheme for the Non-Informative Model
+
+Under this non-informative parameterization, direct composition sampling proceeds via:
+
+1. **Marginal Posterior of Variance ($\sigma^2$):**
+   $$\sigma^2 \mid y \sim \text{Inv-Gamma}\left( \frac{n - p}{2}, \, \frac{\text{SSE}}{2} \right)$$
+
+2. **Conditional Posterior of Coefficients ($\beta$):**
+   $$\beta \mid \sigma^2, y \sim \mathcal{N}_p\left( \hat{\beta}, \, \sigma^2 (X^\top X)^{-1} \right)$$
+
+> **Note on Computational Validity:** Provided the sample size satisfies $n > p$, the updated shape parameter $a_n = \frac{n-p}{2} > 0$. Thus, despite starting with an improper prior, the resulting posterior is strictly proper and well-defined for computational sampling in `rawSampler.r` and `bayesLMConjugate()`.
+
+---
+
+### Raw R Code for Data Analysis
+
+The following section details how the data analysis is executed. We source our primary sampling algorithm from the `raw/src/rawSampler.r` file and apply it directly to the dataset located in `data/data.txt` to generate posterior summaries.
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# 1. Source the external sampling function and load required packages
+source("../src/rawSampler.r")
+library(spBayes) # Required for bayesLMConjugate
+
+# 2. Load the dataset
+dataset <- read.table("../../data/data.txt", header = TRUE)
+y <- dataset[, 1]
+
+# Extract raw predictors and scale them
+X_raw <- as.matrix(dataset[, -1])
+X_scaled <- scale(X_raw)
+
+# Explicitly add a column of 1s for the intercept to the scaled predictors
+X <- cbind(Intercept = 1, X_scaled)
+
+# Ensure column names are clean and explicitly labeled
+if (!is.null(colnames(dataset))) {
+  colnames(X)[-1] <- colnames(dataset)[-1]
+} else {
+  colnames(X)[-1] <- paste0("X", 1:ncol(X_scaled))
+}
+
+n <- nrow(X)
+p <- ncol(X)
+
+# 3. Set prior parameters (Flat, uninformative prior)
+a0 <- -p/2
+b0 <- 0.0
+M0_inv <- matrix(0, nrow = p, ncol = p)
+m0 <- matrix(0, nrow = p, ncol = 1)
+
+# 4. Perform Data Analysis Using rawSampler
+set.seed(42)
+N_samples <- 5000
+
+posterior_samples <- rawSampler(y = y, X = X, m0 = m0, M0_inv = M0_inv, a0 = a0, b0 = b0, N = N_samples)
+raw_draws <- posterior_samples$draws
+
+# 5. Perform Data Analysis Using bayesLMConjugate
+# Create a data frame for the formula interface
+df <- data.frame(y = y, X_scaled)
+
+spB_model <- bayesLMConjugate(
+  y ~ ., 
+  data = df, 
+  n.samples = N_samples, 
+  beta.prior.mean = rep(0, p),
+  beta.prior.precision = M0_inv,
+  prior.shape = a0,
+  prior.rate = b0
+)
+
+# Extract and align spBayes samples using the correct list tag
+spB_mcmc <- as.matrix(spB_model$p.beta.tauSq.samples)
+
+# Robustly extract the variance parameter (it is always the last column)
+spB_sigma2 <- spB_mcmc[, ncol(spB_mcmc)] 
+spB_sigma <- sqrt(spB_sigma2)
+spB_tau <- 1 / spB_sigma2
+
+# Bind spBayes output into a matching matrix structure
+spB_draws <- cbind(spB_mcmc[, 1:p], sigma = spB_sigma, sigma2 = spB_sigma2, tau = spB_tau)
+colnames(spB_draws)[1:p] <- colnames(X)
+
+# 6. Generate Q-Q Plots comparing the two samplers
+num_params <- p + 2 
+cols <- 3
+rows <- ceiling(num_params / cols)
+
+# Set graphical parameters
+par(mfrow = c(rows, cols), pty = "s", mar = c(4, 4, 3, 1), oma = c(0, 0, 4, 0))
+plot_params <- c(colnames(X), "sigma", "tau")
+
+for (param in plot_params) {
+  raw_vals <- raw_draws[, param]
+  spB_vals <- spB_draws[, param]
+  
+  qq_data <- qqplot(raw_vals, spB_vals, plot.it = FALSE)
+  r_squared <- cor(qq_data$x, qq_data$y)^2
+  
+  plot(qq_data$x, qq_data$y, 
+       main = param, 
+       xlab = "composition sampling in raw r code", 
+       ylab = "bayesLMConjugate sampler in spBayes",
+       col = rgb(0.2, 0.4, 0.8, 0.5), 
+       pch = 16,
+       cex = 1.2,          
+       cex.main = 1.5,     
+       cex.lab = 1.2,      
+       cex.axis = 1.1)     
+  
+  abline(0, 1, col = "red", lwd = 2)
+  
+  legend("topleft", bty = "n", legend = bquote(R^2 == .(round(r_squared, 4))), cex = 1.2)
+}
+
+# Add a main title to the overall plot window
+mtext("Comparison of Posterior Draws: rawSampler vs bayesLMConjugate", outer = TRUE, font = 2, cex = 1.8)
+
+# Reset plotting parameters
+par(mfrow = c(1, 1), pty = "m", mar = c(5, 4, 4, 2) + 0.1, oma = c(0, 0, 0, 0))
+```
+
+---
+
+For the mathematical derivations and sampling algorithms behind Bayesian forecasting, see the [Theory of Bayesian Predictions](theoryPredictions.html) page.
