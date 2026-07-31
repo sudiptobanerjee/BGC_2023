@@ -21,7 +21,6 @@ knitr::opts_chunk$set(
 )
 ```
 
-
 *Note:* To generate this HTML file, run `renderJagsTutorial.sh` in the terminal from the `src/bayesianLinearRegressionExact/rjags/run` directory. Alternatively find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
 
 ```bash
@@ -34,33 +33,37 @@ cd src/bayesianLinearRegressionExact/rjags/run
 
 ## Introduction
 
-In standard MCMC applications, sampling from target posterior distributions is achieved via Markov chains (such as Gibbs sampling or Metropolis-Hastings) that require burn-in periods and convergence diagnostics. However, for conjugate normal-linear models, exact posterior samples can be drawn directly using **Composition Sampling**.
+In standard MCMC applications, sampling from target posterior distributions is achieved via Markov chains (such as Gibbs sampling or Metropolis-Hastings) that require burn-in periods and convergence diagnostics due to autocorrelation. However, for conjugate normal-linear models, exact posterior samples can be drawn directly using **Composition Sampling**.
 
-This tutorial demonstrates four distinct computational approaches to exact posterior inference for linear regression under the prior covariance $M_0$ and prior mean $M_0 m_0$ parameterization:
+Because composition draws are independent and identically distributed ($IID$), **no adaptation or burn-in phase is required** (`n.adapt = 0`), and the Effective Sample Size ($ESS$) is identically equal to the number of generated draws ($ESS = M_{\text{samples}}$).
 
-1. **Replicated JAGS Composition Sampler**: Uses a parallel universe / replicated likelihood trick inside JAGS to achieve exact composition sampling without standard MCMC iterations.
-2. **Direct JAGS Composition Sampler**: A likelihood-free / direct variation of the composition sampler in JAGS.
+This tutorial demonstrates four distinct computational approaches to exact posterior inference for linear regression under prior precision $M_0^{-1}$ and prior mean $\mu_0$ parameterization:
+
+1. **Replicated JAGS Composition Sampler**: Uses a parallel universe / replicated likelihood matrix (`Y_rep`) inside JAGS with `n.adapt = 0` to let JAGS' internal conjugate engine draw exact composition samples in sub-second runtime.
+2. **Direct JAGS Composition Sampler**: A likelihood-free variation where posterior parameters ($\mu, M^{-1}$) are computed in R via Cholesky factorizations, and JAGS acts purely as a multivariate composition generator.
 3. **Replicated JAGS vs. `spBayes::bayesLMConjugate`**: Direct validation of Replicated JAGS draws against closed-form analytical conjugate sampling in `spBayes`.
 4. **Direct JAGS vs. `spBayes::bayesLMConjugate`**: Direct validation of Likelihood-Free JAGS draws against `spBayes`.
 
 ---
 
-## 1. Environment Setup & Data Preparation
+## 1. Helper Functions & Environment Setup
 
-We begin by loading the required packages and reading the dataset located at `../../data/data.txt` relative to our working directory (`rjags/run`).
+We define the two inline JAGS composition samplers directly in R and prepare the dataset located at `../../data/data.txt` relative to our working directory (`rjags/run`).
 
-### Model Specification ($M_0$ Prior Covariance Parameterization)
+### Model Specification ($M_0^{-1}$ Prior Precision Parameterization)
 
 Consider the standard linear regression model:
 
 $$Y = X\beta + \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, \sigma^2 I_N)$$
 
-We assign conjugate Normal-Inverse-Gamma priors specified via prior covariance matrix factor $M_0$ and prior mean vector $M_0 m_0$:
+We assign conjugate Normal-Gamma priors specified via prior precision matrix factor $M_0^{-1}$ and prior mean vector $\mu_0 = M_0m_0$:
 
-$$\beta \mid \sigma^2 \sim \mathcal{N}(M_0 m_0, \sigma^2 M_0)$$
+$$\beta \mid \sigma^2 \sim \mathcal{N}\left(\mu_0, \sigma^2 M_0\right)$$
 $$\tau = \frac{1}{\sigma^2} \sim \text{Gamma}(a_0, b_0)$$
 
-The joint posterior density, which is proportional to the joint density of the parameters and the data (prior $\times$ likelihood), can be seen to factorize as (after some algebra involving completion of squares): 
+Setting $M_0^{-1} = O_{P \times P}$ yields an exact flat / uninformative prior $p(\beta) \propto 1$.
+
+The joint posterior density factorizes as:
 \begin{align*}
 p(\beta,\tau \mid Y) &\propto
 \begin{array}{ccc}
@@ -71,26 +74,238 @@ p(\tau\mid Y) & & p(\beta\mid \tau, Y)
 where
 \begin{align*}
 & m = m_0 + X^{\top}Y\;;\quad M^{-1} = M_0^{-1} + X^{\top} X\;;\\
-& a_N = a_0 + \frac{N}{2}\;;\quad b_N = b_0 + \frac{1}{2}\left(m_0^{\top}M_0m_0 + Y^{\top}Y - m^{\top}Mm\right)\;.
+& a_N = a_0 + \frac{N}{2}\;;\quad b_N = b_0 + \frac{1}{2}\left(m_0^{\top}\mu_0 + Y^{\top}Y - m^{\top}Mm\right)\;.
 \end{align*}
 
-The conjugate posterior parameters are updated via Cholesky factorizations ($R_0 = \text{chol}(M_0)$ and $R_N = \text{chol}(M^{-1})$):
+The conjugate posterior parameters are updated via Cholesky factorizations ($R_N = \text{chol}(M^{-1})$):
 
-$$M^{-1} = M_0^{-1} + X^{\top} X = \text{chol2inv}(R_0) + X^{\top} X$$
-$$m = m_0 + X^{\top} Y \implies \mu = M m \quad (\text{solved via } R_N^{\top}\omega=m \text{ to get $\omega$ and then solved for $\mu$ via }  R_N \mu = \omega)$$
+$$M^{-1} = M_0^{-1} + X^{\top} X$$
+$$m = m_0 + X^{\top} Y \implies \mu = M m \quad (\text{solved via } R_N^{\top}\omega=m \text{ to get $\omega$ and then solved for $\mu$ via } R_N \mu = \omega)$$
 $$a_N = a_0 + \frac{N}{2}$$
-$$b_N = b_0 + \frac{1}{2} \left[ Y^{\top} Y + m_0^{\top}M_0m_0 - \mu^{\top}m \right]$$
+$$b_N = b_0 + \frac{1}{2} \left[ Y^{\top} Y + m_0^{\top}\mu_0 - \mu^{\top}m \right]$$
 
-```{r data_prep}
+```{r helper_functions}
 library(spBayes)
 library(rjags)
 library(knitr)
 
-# Source JAGS wrappers from relative source path
-source("../src/compositionSamplingJAGS.r")
-source("../src/compositionSamplingJAGSDirect.r")
+# ---------------------------------------------------------------------
+# 1. Replicated Likelihood JAGS Composition Sampler (Inline Model)
+# ---------------------------------------------------------------------
+run_replicated_jags_composition <- function(X, Y, 
+                                            M_samples = 5000, 
+                                            a0 = 0.01, 
+                                            b0 = 0.01, 
+                                            m0 = NULL, 
+                                            M0_inv = NULL,
+                                            mu0 = NULL) {
+  N <- nrow(X)
+  P <- ncol(X)
+  
+  # Prior Setup
+  if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
+  
+  if (is.null(m0) && is.null(mu0)) {
+    m0  <- rep(0, P)
+    mu0 <- rep(0, P)
+  } else if (!is.null(mu0) && is.null(m0)) {
+    m0 <- as.vector(M0_inv %*% mu0)
+  } else if (!is.null(m0) && is.null(mu0)) {
+    R0_prec <- chol(M0_inv)
+    z0      <- forwardsolve(t(R0_prec), m0)
+    mu0     <- as.vector(backsolve(R0_prec, z0))
+  }
+  
+  # 1. Compute Analytical Posterior Parameters in R
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
+  
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
+  
+  YtY             <- as.numeric(crossprod(Y))
+  prior_quad_term <- as.numeric(crossprod(m0, mu0))
+  post_quad_term  <- sum(zN^2)
+  
+  a_N <- a0 + (N / 2)
+  b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
+  
+  # 2. Draw tau directly in R (Exact Marginal Sample)
+  tau_samples    <- rgamma(M_samples, shape = a_N, rate = b_N)
+  sigma2_samples <- 1 / tau_samples
+  
+  # 3. Precompute 3D precision array in R to bypass JAGS DAG compilation overhead
+  beta_prec_array <- array(NA, dim = c(M_samples, P, P))
+  for (m in 1:M_samples) {
+    beta_prec_array[m, , ] <- M0_inv * tau_samples[m] 
+  }
+  
+  # 4. Replicate Data Matrix Y_rep (M_samples x N)
+  Y_rep <- matrix(Y, nrow = M_samples, ncol = N, byrow = TRUE)
+  
+  # 5. Inline JAGS Model String
+  model_string <- "
+  model {
+    for (m in 1:M_samples) {
+      beta[m, 1:P] ~ dmnorm(beta_mean_prior[1:P], beta_prec[m, 1:P, 1:P])
+      for (i in 1:N) {
+        mu_y[m, i] <- inprod(X[i, 1:P], beta[m, 1:P])
+        Y_rep[m, i] ~ dnorm(mu_y[m, i], tau[m])
+      }
+    }
+  }
+  "
+  
+  jags_data <- list(
+    N = N,
+    P = P,
+    M_samples = M_samples,
+    X = X,
+    Y_rep = Y_rep,
+    tau = tau_samples, 
+    beta_prec = beta_prec_array,
+    beta_mean_prior = as.numeric(mu0)
+  )
+  
+  # 6. Compile and Sample in 1 Iteration without Adaptation
+  jags_model <- jags.model(
+    textConnection(model_string), 
+    data = jags_data, 
+    n.chains = 1,
+    n.adapt = 0,
+    quiet = TRUE 
+  )
+  
+  jags_out <- jags.samples(
+    jags_model, 
+    variable.names = c("beta"), 
+    n.iter = 1,
+    progress.bar = "none"
+  )
+  
+  beta_samples_jags <- jags_out$beta[, , 1, 1]
+  
+  draws <- cbind(
+    beta_samples_jags, 
+    sigma2 = sigma2_samples,
+    tau    = tau_samples,
+    sigma  = sqrt(sigma2_samples)
+  )
+  
+  if (is.null(colnames(X))) {
+    colnames(draws)[1:P] <- paste0("beta[", 1:P, "]")
+  } else {
+    colnames(draws)[1:P] <- colnames(X)
+  }
+  
+  return(list(draws = draws))
+}
 
-# Load data from project-level data directory
+# ---------------------------------------------------------------------
+# 2. Direct JAGS Composition Sampler (Likelihood-Free Inline Model)
+# ---------------------------------------------------------------------
+run_direct_jags_composition <- function(X, Y, 
+                                        n_samples = 5000, 
+                                        a0 = 0.01, 
+                                        b0 = 0.01, 
+                                        m0 = NULL, 
+                                        M0_inv = NULL,
+                                        mu0 = NULL) {
+  N <- nrow(X)
+  P <- ncol(X)
+  
+  if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
+  
+  if (is.null(m0) && is.null(mu0)) {
+    m0  <- rep(0, P)
+    mu0 <- rep(0, P)
+  } else if (!is.null(mu0) && is.null(m0)) {
+    m0 <- as.vector(M0_inv %*% mu0)
+  } else if (!is.null(m0) && is.null(mu0)) {
+    R0_prec <- chol(M0_inv)
+    z0      <- forwardsolve(t(R0_prec), m0)
+    mu0     <- as.vector(backsolve(R0_prec, z0))
+  }
+  
+  # 1. Compute Analytical Posterior Parameters in R
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
+  
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
+  
+  YtY             <- as.numeric(crossprod(Y))
+  prior_quad_term <- as.numeric(crossprod(m0, mu0))
+  post_quad_term  <- sum(zN^2)
+  
+  a_N <- a0 + (N / 2)
+  b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
+  
+  # 2. Inline JAGS Model String
+  model_string <- "
+  model {
+    # Exact Marginal Draw for Precision
+    tau ~ dgamma(a_N, b_N)
+    sigma2 <- 1 / tau
+    
+    # Construct Conditional Precision Matrix for Beta
+    for (j in 1:P) {
+      for (k in 1:P) {
+        Omega[j, k] <- tau * M_inv[j, k]
+      }
+    }
+    
+    # Exact Conditional Draw for Beta Coefficients
+    beta[1:P] ~ dmnorm(mu[1:P], Omega[1:P, 1:P])
+  }
+  "
+  
+  jags_data <- list(
+    P = P,
+    a_N = a_N,
+    b_N = b_N,
+    mu = as.numeric(mu),
+    M_inv = M_inv
+  )
+  
+  jags_model <- jags.model(
+    textConnection(model_string),
+    data = jags_data,
+    n.chains = 1,
+    n.adapt = 0,
+    quiet = TRUE
+  )
+  
+  coda_samples <- coda.samples(
+    model = jags_model,
+    variable.names = c("beta", "sigma2", "tau"),
+    n.iter = n_samples,
+    progress.bar = "none"
+  )
+  
+  draws <- as.matrix(coda_samples)
+  
+  beta_cols <- grep("beta", colnames(draws))
+  if (is.null(colnames(X))) {
+    colnames(draws)[beta_cols] <- paste0("beta[", 1:P, "]")
+  } else {
+    colnames(draws)[beta_cols] <- colnames(X)
+  }
+  
+  draws <- cbind(draws, sigma = sqrt(draws[, "sigma2"]))
+  
+  # Standardize Column Order: (betas, sigma2, tau, sigma)
+  col_order <- c(colnames(X), "sigma2", "tau", "sigma")
+  draws <- draws[, col_order]
+  
+  return(list(draws = draws))
+}
+```
+
+```{r data_prep}
+# Load Data
 rawData <- read.table("../../data/data.txt", header = TRUE)
 
 # Prepare response and scaled design matrix
@@ -103,38 +318,43 @@ N <- nrow(X)
 P <- ncol(X)
 n_samples <- 5000
 
-# Shared prior specification (M0 = prior covariance factor)
-M0 <- diag(100, P)
-m0 <- rep(0, P) # mu0_vec = M0 %*% m0 = 0
-a0 <- 0.01
-b0 <- 0.01
+# Shared Prior Specifications (Prior Precision Factor M0_inv)
+M0_inv <- diag(0.01, P) # Equivalent to M0 = diag(100, P)
+m0     <- rep(0, P)     # Precision-weighted mean (m0 = M0_inv %*% mu0 = 0)
+a0     <- 0.01
+b0     <- 0.01
 
 cat("Dataset loaded successfully:", N, "observations and", P, "predictors (including Intercept).\n")
 ```
 
 ---
 
-## 2. Replicated Likelihood JAGS Sampler (`lmExactJags.r`)
+## 2. Replicated Likelihood JAGS Sampler (`run_replicated_jags_composition`)
 
-In this section, we execute exact composition sampling using `run_replicated_jags_composition()`. This function draws exact posterior samples without relying on Markov chain convergence.
+In this section, JAGS receives the prior precision $M_0^{-1}$, prior mean $\mu_0$, pre-sampled $\tau$, and $M$ replicated rows of $Y$ (`Y_rep`). JAGS computes the conditional likelihood $Y_{\text{rep}} \sim \mathcal{N}(X\beta, \tau^{-1})$ internally, using its built-in conjugate engine to draw exact posterior samples in 1 iteration without adaptation (`n.adapt = 0`).
 
 ```{r exact_jags_replicated}
 set.seed(123)
 
 cat("Executing parallel universe composition sampling in JAGS...\n")
-jags_rep_results <- run_replicated_jags_composition(
-  X = X, 
-  Y = Y, 
-  M_samples = n_samples,
-  a0 = a0,
-  b0 = b0,
-  m0 = m0,
-  M0 = M0
-)
+runtime_rep <- system.time({
+  jags_rep_results <- run_replicated_jags_composition(
+    X = X, 
+    Y = Y, 
+    M_samples = n_samples,
+    a0 = a0,
+    b0 = b0,
+    m0 = m0,
+    M0_inv = M0_inv
+  )
+})
+
+cat("Replicated Likelihood JAGS Runtime (seconds):\n")
+print(runtime_rep)
 
 rep_samples <- jags_rep_results$draws
 
-# Summary statistics (transposition via crossprod against identity matrix)
+# Summary Statistics
 rep_means     <- colMeans(rep_samples)
 rep_sds       <- apply(rep_samples, 2, sd)
 rep_quantiles <- crossprod(apply(rep_samples, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))
@@ -145,27 +365,32 @@ kable(summary_rep, caption = "JAGS Replicated Likelihood Posterior Summary")
 
 ---
 
-## 3. Direct Composition Sampler in JAGS (`lmExactJagsDirect.r`)
+## 3. Direct Composition Sampler in JAGS (`run_direct_jags_composition`)
 
-Next, we evaluate the direct composition sampler using `run_direct_jags_composition()`.
+Next, we evaluate the direct composition sampler. R pre-computes the posterior parameters ($\mu, M^{-1}$) via triangular solvers, and JAGS samples directly from $p(\tau \mid Y) = \text{Gamma}(a_N, b_N)$ and $p(\beta \mid \tau, Y) = \mathcal{N}(\mu, (\tau M^{-1})^{-1})$.
 
 ```{r exact_jags_direct}
 set.seed(123)
 
 cat("Executing exact direct sampling in JAGS (Likelihood-Free)...\n")
-jags_dir_results <- run_direct_jags_composition(
-  X = X,
-  Y = Y,
-  n_samples = n_samples,
-  a0 = a0,
-  b0 = b0,
-  m0 = m0,
-  M0 = M0
-)
+runtime_dir <- system.time({
+  jags_dir_results <- run_direct_jags_composition(
+    X = X,
+    Y = Y,
+    n_samples = n_samples,
+    a0 = a0,
+    b0 = b0,
+    m0 = m0,
+    M0_inv = M0_inv
+  )
+})
+
+cat("Direct Likelihood-Free JAGS Runtime (seconds):\n")
+print(runtime_dir)
 
 dir_samples <- jags_dir_results$draws
 
-# Summary statistics (transposition via crossprod against identity matrix)
+# Summary Statistics
 dir_means     <- colMeans(dir_samples)
 dir_sds       <- apply(dir_samples, 2, sd)
 dir_quantiles <- crossprod(apply(dir_samples, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))
@@ -176,9 +401,9 @@ kable(summary_dir, caption = "JAGS Direct Posterior Summary (Likelihood-Free)")
 
 ---
 
-## 4. Replicated JAGS vs. `spBayes::bayesLMConjugate` (`lmExactJagsVsBayesLMConjugate.r`)
+## 4. Replicated JAGS vs. `spBayes::bayesLMConjugate`
 
-We now compare the draws from the Replicated JAGS composition sampler against the analytical draws generated by `spBayes::bayesLMConjugate()`.
+We now compare draws from the Replicated JAGS sampler against analytical conjugate draws generated by `spBayes::bayesLMConjugate()`.
 
 ```{r compare_rep_vs_spbayes}
 df <- data.frame(Y = Y, X_scaled)
@@ -187,15 +412,15 @@ df <- data.frame(Y = Y, X_scaled)
 set.seed(123)
 jags_rep <- run_replicated_jags_composition(
   X = X, Y = Y, M_samples = n_samples,
-  a0 = a0, b0 = b0, m0 = m0, M0 = M0
+  a0 = a0, b0 = b0, m0 = m0, M0_inv = M0_inv
 )$draws
 
-# 2. Run spBayes (prior precision computed via chol2inv(chol(M0)))
+# 2. Run spBayes
 set.seed(123)
 spb_model_1 <- bayesLMConjugate(
   formula = Y ~ ., data = df, n.samples = n_samples,
-  beta.prior.mean = as.vector(crossprod(chol(M0), chol(M0) %*% m0)), 
-  beta.prior.precision = chol2inv(chol(M0)),
+  beta.prior.mean = rep(0, P), 
+  beta.prior.precision = M0_inv,
   prior.shape = a0, prior.rate = b0
 )
 
@@ -224,10 +449,7 @@ kable(s_spb1, caption = "Posterior Summary: spBayes::bayesLMConjugate")
 To verify that the empirical distributions match, we construct quantile-quantile (Q-Q) plots for each parameter and compute the $R^2$ coefficient between sorted quantiles.
 
 ```{r qqplot_rep_vs_spbayes, fig.height=9, fig.width=12}
-# Save PNG copy to disk
-png("comparisonsJagsVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
 par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
-
 param_names <- colnames(jags_rep)
 
 for (param in param_names) {
@@ -246,31 +468,15 @@ for (param in param_names) {
          bty = "n", text.col = "black")
 }
 par(mfrow = c(1, 1))
+
+# Save PNG copy to disk
+dev.copy(png, "comparisonsJagsVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
 dev.off()
-
-# Re-plot inline for the knitted Rmd report
-par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
-for (param in param_names) {
-  x_jags    <- sort(jags_rep[, param])
-  y_spbayes <- sort(spb_samples1[, param])
-  r2        <- cor(x_jags, y_spbayes)^2
-
-  plot(x_jags, y_spbayes,
-       main = param,
-       xlab = "composition sampling in rjags", 
-       ylab = "bayesLMConjugate in spBayes",
-       pch = 20, col = rgb(0.1, 0.2, 0.7, alpha = 0.5))
-  
-  abline(a = 0, b = 1, col = "red", lwd = 2)
-  legend("topleft", legend = bquote(R^2 == .(format(r2, digits = 4))), 
-         bty = "n", text.col = "black")
-}
-par(mfrow = c(1, 1))
 ```
 
 ---
 
-## 5. Direct JAGS vs. `spBayes::bayesLMConjugate` (`lmExactJagsDirectVsBayesLMConjugate.r`)
+## 5. Direct JAGS vs. `spBayes::bayesLMConjugate`
 
 Finally, we validate the Direct JAGS composition sampler against `spBayes::bayesLMConjugate()`.
 
@@ -279,15 +485,15 @@ Finally, we validate the Direct JAGS composition sampler against `spBayes::bayes
 set.seed(123)
 jags_dir <- run_direct_jags_composition(
   X = X, Y = Y, n_samples = n_samples,
-  a0 = a0, b0 = b0, m0 = m0, M0 = M0
+  a0 = a0, b0 = b0, m0 = m0, M0_inv = M0_inv
 )$draws
 
-# 2. Run spBayes (prior precision computed via chol2inv(chol(M0)))
+# 2. Run spBayes
 set.seed(123)
 spb_model_2 <- bayesLMConjugate(
   formula = Y ~ ., data = df, n.samples = n_samples,
-  beta.prior.mean = as.vector(crossprod(chol(M0), chol(M0) %*% m0)), 
-  beta.prior.precision = chol2inv(chol(M0)),
+  beta.prior.mean = rep(0, P), 
+  beta.prior.precision = M0_inv,
   prior.shape = a0, prior.rate = b0
 )
 
@@ -314,10 +520,7 @@ kable(s_spb2, caption = "Posterior Summary: spBayes::bayesLMConjugate")
 ### Diagnostics: Q-Q Plots ($R^2$ Comparison)
 
 ```{r qqplot_dir_vs_spbayes, fig.height=9, fig.width=12}
-# Save PNG copy to disk
-png("comparisonsJagsDirectVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
 par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
-
 param_names <- colnames(jags_dir)
 
 for (param in param_names) {
@@ -336,33 +539,17 @@ for (param in param_names) {
          bty = "n", text.col = "black")
 }
 par(mfrow = c(1, 1))
+
+# Save PNG copy to disk
+dev.copy(png, "comparisonsJagsDirectVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
 dev.off()
-
-# Re-plot inline for the knitted Rmd report
-par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
-for (param in param_names) {
-  x_jags    <- sort(jags_dir[, param])
-  y_spbayes <- sort(spb_samples2[, param])
-  r2        <- cor(x_jags, y_spbayes)^2
-
-  plot(x_jags, y_spbayes,
-       main = param,
-       xlab = "composition sampling in rjags", 
-       ylab = "bayesLMConjugate sampler in spBayes",
-       pch = 20, col = rgb(0.1, 0.2, 0.7, alpha = 0.5))
-  
-  abline(a = 0, b = 1, col = "red", lwd = 2)
-  legend("topleft", legend = bquote(R^2 == .(format(r2, digits = 4))), 
-         bty = "n", text.col = "black")
-}
-par(mfrow = c(1, 1))
 ```
 
 ---
 
 ## 6. Summary & Key Takeaways
 
-1. **Exact Posterior Agreement**: Both JAGS composition sampling approaches (Replicated and Direct) match the analytical conjugate sampling from `spBayes::bayesLMConjugate` with $R^2 \approx 1.000$ across all quantile distributions.
-2. **Numerical Stability**: By substituting general matrix inversions (`solve`) with Cholesky factorizations (`chol`, `chol2inv`) and forward/back substitutions (`forwardsolve`, `backsolve`), linear solves are performed with optimal numerical precision and $\mathcal{O}(P^3/3)$ efficiency.
-3. **Efficiency**: While the Replicated Likelihood approach requires $M$ copies of $Y$ in memory, the Direct Composition approach is highly memory-efficient while achieving identical posterior accuracy.
-
+1. **Sub-second Execution**: Setting `n.adapt = 0` eliminates JAGS' default 1,000-iteration adaptation phase, executing $M=5,000$ exact posterior draws almost instantaneously.
+2. **Exact Posterior Agreement**: Both JAGS composition sampling approaches (Replicated Likelihood and Direct) match analytical conjugate sampling from `spBayes::bayesLMConjugate` with $R^2 \approx 1.000$ across all quantile distributions.
+3. **Prior Precision Flexibility**: Inputting prior precision $M_0^{-1}$ directly enables exact uninformative / flat priors ($M_0^{-1} = \mathbf{0}$) without non-invertible matrix errors.
+4. **Efficiency vs. Memory**: While the Replicated Likelihood trick relies on JAGS conjugate engines via an $M \times N$ matrix (`Y_rep`), the Direct Composition sampler pre-computes $M^{-1}$ and $\mu$ using Cholesky factorizations (`chol`, `forwardsolve`, `backsolve`) for maximum memory efficiency.

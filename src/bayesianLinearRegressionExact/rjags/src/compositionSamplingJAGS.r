@@ -1,86 +1,127 @@
+# src/compositionSamplingJAGS.r
+
 library(rjags)
 
-run_replicated_jags_composition <- function(X, Y = NULL, M_samples = 5000, a0 = 0.01, b0 = 0.01, 
-                                            m0 = NULL, M0 = NULL, mu0 = NULL, V0 = NULL, 
-                                            y = NULL, M_param = NULL, n_samples = NULL) {
-  # Handle argument aliases
-  if (is.null(Y) && !is.null(y)) Y <- y
-  if (!is.null(M_param)) M_samples <- M_param
-  if (!is.null(n_samples)) M_samples <- n_samples
-  
+run_replicated_jags_composition <- function(X, Y, 
+                                            M_samples = 5000, 
+                                            a0 = 0.01, 
+                                            b0 = 0.01, 
+                                            m0 = NULL, 
+                                            M0_inv = NULL,
+                                            mu0 = NULL) {
   N <- nrow(X)
   P <- ncol(X)
   
-  # Prior Covariance Factor M0 & Cholesky Decomposition
-  if (is.null(M0)) {
-    if (!is.null(V0)) M0 <- V0 else M0 <- diag(100, P)
+  # -------------------------------------------------------------------
+  # Setup Prior Precision Factor M0_inv and Mean Vectors (m0, mu0)
+  # -------------------------------------------------------------------
+  if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
+  
+  if (is.null(m0) && is.null(mu0)) {
+    m0  <- rep(0, P)
+    mu0 <- rep(0, P)
+  } else if (!is.null(mu0) && is.null(m0)) {
+    m0 <- as.vector(M0_inv %*% mu0)
+  } else if (!is.null(m0) && is.null(mu0)) {
+    R0_prec <- chol(M0_inv)
+    z0      <- forwardsolve(t(R0_prec), m0)
+    mu0     <- as.vector(backsolve(R0_prec, z0))
   }
-  R0     <- chol(M0)
-  M0_inv <- chol2inv(R0) # Prior precision factor via Cholesky inverse
   
-  # Precision-weighted prior mean m0 and prior mean vector mu0_vec
-  if (is.null(m0)) {
-    if (!is.null(mu0)) {
-      # Solve M0 %*% m0 = mu0 for m0 using triangular solvers
-      z0 <- forwardsolve(R0, mu0, upper.tri = TRUE, transpose = TRUE)
-      m0 <- as.vector(backsolve(R0, z0))
-    } else {
-      m0 <- rep(0, P)
-    }
+  # -------------------------------------------------------------------
+  # 1. Compute Analytical Posterior Parameters in R
+  # -------------------------------------------------------------------
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
+  
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
+  
+  YtY             <- as.numeric(crossprod(Y))
+  prior_quad_term <- as.numeric(crossprod(m0, mu0))
+  post_quad_term  <- sum(zN^2)
+  
+  a_N <- a0 + (N / 2)
+  b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
+  
+  # -------------------------------------------------------------------
+  # 2. Draw tau directly in R (Exact Marginal Sample)
+  # -------------------------------------------------------------------
+  tau_samples    <- rgamma(M_samples, shape = a_N, rate = b_N)
+  sigma2_samples <- 1 / tau_samples
+  
+  # -------------------------------------------------------------------
+  # 3. Precompute 3D precision array (Bypasses JAGS DAG build overhead)
+  # -------------------------------------------------------------------
+  beta_prec_array <- array(NA, dim = c(M_samples, P, P))
+  for (m in 1:M_samples) {
+    beta_prec_array[m, , ] <- M0_inv * tau_samples[m] 
   }
-  # mu0_vec = M0 %*% m0 = R0^T %*% (R0 %*% m0)
-  mu0_vec <- as.vector(crossprod(R0, R0 %*% m0))
   
-  # Posterior Parameter Updates using crossprod and Cholesky
-  M_inv <- M0_inv + crossprod(X) # Posterior precision factor
-  RN    <- chol(M_inv)           # Cholesky factor of posterior precision
+  # -------------------------------------------------------------------
+  # 4. Replicate Data Matrix Y_rep (M_samples x N)
+  # -------------------------------------------------------------------
+  Y_rep <- matrix(Y, nrow = M_samples, ncol = N, byrow = TRUE)
   
-  m  <- as.vector(m0 + crossprod(X, Y)) # Precision-weighted posterior mean
-  
-  # Solve M_inv %*% mu = m for mu using triangular solvers (RN^T RN mu = m)
-  zN <- forwardsolve(RN, m, upper.tri = TRUE, transpose = TRUE)
-  mu <- as.vector(backsolve(RN, zN))   # Posterior mean vector
-  
-  a_N <- a0 + N / 2
-  b_N <- as.numeric(b0 + 0.5 * (crossprod(Y) + crossprod(mu0_vec, m0) - crossprod(mu, m)))
-  
-  # JAGS sampler (dmnorm expects mean mu and precision matrix tau * M_inv)
+  # -------------------------------------------------------------------
+  # 5. Inline JAGS Model Definition
+  # -------------------------------------------------------------------
   model_string <- "
   model {
-    for (k in 1:M_SAMPLES) {
-      tau[k] ~ dgamma(a_N, b_N)
-      sigma2[k] <- 1 / tau[k]
-      sigma[k] <- sqrt(sigma2[k])
-      beta[k, 1:P] ~ dmnorm(mu[1:P], tau[k] * M_inv[1:P, 1:P])
+    for (m in 1:M_samples) {
+      beta[m, 1:P] ~ dmnorm(beta_mean_prior[1:P], beta_prec[m, 1:P, 1:P])
+      for (i in 1:N) {
+        mu_y[m, i] <- inprod(X[i, 1:P], beta[m, 1:P])
+        Y_rep[m, i] ~ dnorm(mu_y[m, i], tau[m])
+      }
     }
   }
   "
   
   jags_data <- list(
+    N = N,
     P = P,
-    M_SAMPLES = M_samples,
-    mu = mu,
-    M_inv = M_inv,
-    a_N = a_N,
-    b_N = b_N
+    M_samples = M_samples,
+    X = X,
+    Y_rep = Y_rep,
+    tau = tau_samples, 
+    beta_prec = beta_prec_array,
+    beta_mean_prior = as.numeric(mu0)
   )
   
-  model <- jags.model(textConnection(model_string), data = jags_data, n.chains = 1, quiet = TRUE)
-  samples <- jags.samples(model, variable.names = c("beta", "sigma2", "tau", "sigma"), n.iter = 1)
+  # -------------------------------------------------------------------
+  # 6. Compile and Sample in 1 Iteration without Adaptation
+  # -------------------------------------------------------------------
+  jags_model <- jags.model(
+    textConnection(model_string), 
+    data = jags_data, 
+    n.chains = 1,
+    n.adapt = 0,
+    quiet = TRUE 
+  )
   
-  # Reshape 4D mcarray directly into an (M_samples x P) matrix without t()
-  beta_draws <- matrix(samples$beta, nrow = M_samples, ncol = P)
+  jags_out <- jags.samples(
+    jags_model, 
+    variable.names = c("beta"), 
+    n.iter = 1,
+    progress.bar = "none"
+  )
+  
+  beta_samples_jags <- jags_out$beta[, , 1, 1]
+  
+  draws <- cbind(
+    beta_samples_jags, 
+    sigma2 = sigma2_samples,
+    tau    = tau_samples,
+    sigma  = sqrt(sigma2_samples)
+  )
+  
   if (is.null(colnames(X))) {
-    colnames(beta_draws) <- paste0("beta[", 1:P, "]")
+    colnames(draws)[1:P] <- paste0("beta[", 1:P, "]")
   } else {
-    colnames(beta_draws) <- colnames(X)
+    colnames(draws)[1:P] <- colnames(X)
   }
-  
-  sigma2_draws <- as.vector(samples$sigma2)
-  tau_draws    <- as.vector(samples$tau)
-  sigma_draws  <- as.vector(samples$sigma)
-  
-  draws <- cbind(beta_draws, sigma2 = sigma2_draws, tau = tau_draws, sigma = sigma_draws)
   
   return(list(draws = draws))
 }
