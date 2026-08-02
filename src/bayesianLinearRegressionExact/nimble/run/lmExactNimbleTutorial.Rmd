@@ -41,13 +41,11 @@ Composition sampling provides a method to draw exact samples from a joint distri
 
 We offer some heuristics on why the distribution of the simulated random variables is $(X_i^*, Y_i^*) \stackrel{ind}{\sim} f_{X,Y}(\cdot, \cdot)$. It is clear that $P(X_i^* \leq u) = \int_{-\infty}^{u} f_X(x)dx$ because $X_i^* \sim f_X(\cdot)$, i.e., $X_i^*$ has the same distribution as $X$. And $P(Y_i^* \leq v \mid X_i^* = x) = \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dy$ because $Y_i^* \mid (X_i^* = x) \sim f_{Y \mid X}(\cdot \mid x)$. Therefore,
 
-$$P(X_i^* \leq u, Y_i^* \leq v) = \int_{-\infty}^{u} f_X(x) \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dydx$$
-$$= \int_{-\infty}^{u} \int_{-\infty}^{v} f_X(x)f_{Y \mid X}(y \mid x)dydx$$
-$$= P(X \leq u, Y \leq v).$$
+$$P(X_i^* \leq u, Y_i^* \leq v) = \int_{-\infty}^{u} f_X(x) \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dydx = \int_{-\infty}^{u} \int_{-\infty}^{v} f_X(x)f_{Y \mid X}(y \mid x)dydx = P(X \leq u, Y \leq v).$$
 
-Hence, $(X_i, Y_i) \stackrel{d}{=} (X,Y)$. 
+Hence, $(X_i, Y_i) \stackrel{d}{=} (X,Y)$. Since each draw is independent across $i$, the samples are independent. 
 
-Since each draw is independent across $i$, the samples are independent. We can apply this method to draw samples from a joint posterior distribution,
+We can apply this method to draw samples from a joint posterior distribution,
 
 $$p(\theta_1, \theta_2 \mid y) = p(\theta_1 \mid y) \times p(\theta_2 \mid \theta_1, y).$$
 
