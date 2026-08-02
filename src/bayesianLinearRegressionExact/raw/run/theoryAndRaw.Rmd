@@ -38,6 +38,28 @@ $$m = m_0 + X^{\top}V_y^{-1}y \quad ; \quad M^{-1} = M_0^{-1} + X^{\top} V_y^{-1
 
 ---
 
+We will draw *exact* posterior samples from the joint posterior distribution $p(\beta,\sigma^2 \mid y)$ using **Composition Sampling.** Before, getting into the specifics of sampling from this posterior distribution, here is a brief overview of compostion sampling.
+
+### Composition Sampling Overview
+
+Composition sampling provides a method to draw exact samples from a joint distribution by utilizing marginal and conditional sampling. For two random variables $X$ and $Y$ with a joint density function $f(X,Y)$, the density at $(x,y)$ can be written as $f_{X,Y}(x,y) = f_X(x)f_{Y|X}(y|x)$. Suppose we can draw samples from $f_X$ and $f_{Y|X}$ for any given $X = x$. To generate $N$ samples from this joint distribution, one first draws a sample $X_i^* = x_i \sim f_X$ from the marginal distribution of $X$ for $i = 1, \dots, N$. Then, for each drawn value $x_i$, a subsequent sample $Y_i^* \sim f_{Y|X}(\cdot \mid x_i)$ is drawn for $i = 1, \dots, N$.
+
+We offer some heuristics on why the distribution of the simulated random variables is $(X_i^*, Y_i^*) \stackrel{ind}{\sim} f_{X,Y}(\cdot, \cdot)$. It is clear that $P(X_i^* \leq u) = \int_{-\infty}^{u} f_X(x)dx$ because $X_i^* \sim f_X(\cdot)$, i.e., $X_i^*$ has the same distribution as $X$. And $P(Y_i^* \leq v \mid X_i^* = x) = \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dy$ because $Y_i^* \mid (X_i^* = x) \sim f_{Y \mid X}(\cdot \mid x)$. Therefore,
+
+$$P(X_i^* \leq u, Y_i^* \leq v) = \int_{-\infty}^{u} f_X(x) \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dydx = \int_{-\infty}^{u} \int_{-\infty}^{v} f_X(x)f_{Y \mid X}(y \mid x)dydx = \int_{-\infty}^{u}\int_{-\infty}^{v} f_{X,Y}(x,y)dydx = P(X \leq u, Y \leq v).$$
+
+Hence, $(X_i, Y_i) \stackrel{d}{=} (X,Y)$. Since each draw is independent across $i$, the samples are independent. 
+
+We can apply this method to draw samples from a joint posterior distribution,
+
+$$p(\theta_1, \theta_2 \mid y) = p(\theta_1 \mid y) \times p(\theta_2 \mid \theta_1, y).$$
+
+In conjugate models, it is often easy to draw samples from $p(\theta_1 \mid y)$ and from $p(\theta_2 \mid \theta_1, y)$. We first draw $N$ samples $\theta_{1(i)} \sim p(\theta_1 \mid y)$ and, for each drawn value $\theta_{1(i)}$, we draw $\theta_{2(i)} \sim p(\theta_2 \mid \theta_{1(i)}, y)$.
+
+---
+
+We now apply composition sampling to the conjugate posterior. We first draw $\sigma^2 \sim p(\sigma^2 \mid y)$ and then draw $\beta \sim p(\beta \mid y, \sigma^2)$ using the previously drawn value of $\sigma^2$. **Algorithm 1** presents the steps for drawing $N$ posterior samples from $p(\beta, \sigma^2 \mid y)$. 
+
 **Algorithm 1:** Exact posterior sampling from $p(\beta, \sigma^2 \mid y)$
 
 1. **For** $i$ in $1:N$:

@@ -26,7 +26,7 @@ knitr::opts_chunk$set(
 ```bash
 # Navigate to the directory and run the compilation script
 cd src/bayesianLinearRegressionExact/rjags/run
-./renderRaw.sh
+./renderJagsTutorial.sh
 ```
 
 ---
@@ -34,6 +34,22 @@ cd src/bayesianLinearRegressionExact/rjags/run
 ## Introduction
 
 In standard MCMC applications, sampling from target posterior distributions is achieved via Markov chains (such as Gibbs sampling or Metropolis-Hastings) that require burn-in periods and convergence diagnostics due to autocorrelation. However, for conjugate normal-linear models, exact posterior samples can be drawn directly using **Composition Sampling**.
+
+### Composition Sampling Overview
+
+Composition sampling provides a method to draw exact samples from a joint distribution by utilizing marginal and conditional sampling. For two random variables $X$ and $Y$ with a joint density function $f(X,Y)$, the density at $(x,y)$ can be written as $f_{X,Y}(x,y) = f_X(x)f_{Y|X}(y|x)$. Suppose we can draw samples from $f_X$ and $f_{Y|X}$ for any given $X = x$. To generate $N$ samples from this joint distribution, one first draws a sample $X_i^* = x_i \sim f_X$ from the marginal distribution of $X$ for $i = 1, \dots, N$. Then, for each drawn value $x_i$, a subsequent sample $Y_i^* \sim f_{Y|X}(\cdot \mid x_i)$ is drawn for $i = 1, \dots, N$.
+
+We offer some heuristics on why the distribution of the simulated random variables is $(X_i^*, Y_i^*) \stackrel{ind}{\sim} f_{X,Y}(\cdot, \cdot)$. It is clear that $P(X_i^* \leq u) = \int_{-\infty}^{u} f_X(x)dx$ because $X_i^* \sim f_X(\cdot)$, i.e., $X_i^*$ has the same distribution as $X$. And $P(Y_i^* \leq v \mid X_i^* = x) = \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dy$ because $Y_i^* \mid (X_i^* = x) \sim f_{Y \mid X}(\cdot \mid x)$. Therefore,
+
+$$P(X_i^* \leq u, Y_i^* \leq v) = \int_{-\infty}^{u} f_X(x) \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dydx = \int_{-\infty}^{u} \int_{-\infty}^{v} f_X(x)f_{Y \mid X}(y \mid x)dydx = P(X \leq u, Y \leq v).$$
+
+Hence, $(X_i, Y_i) \stackrel{d}{=} (X,Y)$. Since each draw is independent across $i$, the samples are independent. 
+
+We can apply this method to draw samples from a joint posterior distribution,
+
+$$p(\theta_1, \theta_2 \mid y) = p(\theta_1 \mid y) \times p(\theta_2 \mid \theta_1, y).$$
+
+In conjugate models, it is often easy to draw samples from $p(\theta_1 \mid y)$ and from $p(\theta_2 \mid \theta_1, y)$. We first draw $N$ samples $\theta_{1(i)} \sim p(\theta_1 \mid y)$ and, for each drawn value $\theta_{1(i)}$, we draw $\theta_{2(i)} \sim p(\theta_2 \mid \theta_{1(i)}, y)$. For example, specifically in Bayesian linear regression, we first draw $\sigma^2i_{(i)} \sim p(\sigma^2 \mid y)$ and then draw $\beta_{(i)} \sim p(\beta \mid y, \sigma^2_{(i)})$ using the previously drawn value of $\sigma^2_{(i)}$.
 
 Because composition draws are independent and identically distributed ($IID$), **no adaptation or burn-in phase is required** (`n.adapt = 0`), and the Effective Sample Size ($ESS$) is identically equal to the number of generated draws ($ESS = M_{\text{samples}}$).
 

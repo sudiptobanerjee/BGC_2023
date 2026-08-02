@@ -76,6 +76,14 @@ This approach completely eliminates explicit matrix inversions, preserves numeri
 
 # Composition Sampling Algorithms for Parameter Inference
 
+
+We will draw *exact* posterior samples from the joint posterior distribution $p(
+\beta,\sigma^2 \mid y)$ using **Composition Sampling.** Here is a brief overview of compostion sampling. Composition sampling provides a method to draw exact samples from a joint distribution by utilizing marginal and conditional sampling. For two random variables $X$ and $Y$ with a joint density function $f(X,Y)$, the density at $(x,y)$ can be written as $f_{X,Y}(x,y) = f_X(x)f_{Y|X}(y|x)$. Suppose we can draw samples from $f_X$ and $f_{Y|X}$ for any given $X = x$. To generate $N$ samples from this joint distribution, one first draws a sample $X_i^* = x_i \sim f_X$ from the marginal distribution of $X$ for $i = 1, \dots, N$. Then, for each drawn value $x_i$, a subsequent sample $Y_i^* \sim f_{Y|X}(\cdot \mid x_i)$ is drawn for $i = 1,\dots, N$.
+
+In conjugate models, it is often easy to draw samples from $p(\theta_1 \mid y)$ 
+and from $p(\theta_2 \mid \theta_1, y)$. We first draw $N$ samples $\theta_{1(i)
+} \sim p(\theta_1 \mid y)$ and, for each drawn value $\theta_{1(i)}$, we draw $\theta_{2(i)} \sim p(\theta_2 \mid \theta_{1(i)}, y)$. Hence, in Bayesian linear regression, we first draw $\sigma^2i_{(i)} \sim p(\sigma^2 \mid y)$ and then draw $\beta_{(i)} \sim p(\beta \mid y, \sigma^2_{(i)})$ using the previously drawn value of $\sigma^2_{(i)}$. 
+
 ## Algorithm 1: General Conjugate Prior Case 
 
 **Inputs:** Response vector $y \in \mathbb{R}^n$, unscaled design matrix $X \in \mathbb{R}^{n \times p}$, prior precision factor $M_0^{-1} \in \mathbb{R}^{p \times p}$, prior location $m_0 \in \mathbb{R}^{p \times 1}$, Inverse-Gamma hyperparameters $a_0, b_0$, and requested draw count $N$.

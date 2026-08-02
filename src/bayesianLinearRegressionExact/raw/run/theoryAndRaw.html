@@ -411,6 +411,54 @@ X^{\top}V_y^{-1}y \quad ; \quad M^{-1} = M_0^{-1} + X^{\top} V_y^{-1}
 X\]</span></p></li>
 </ul>
 <hr />
+<p>We will draw <em>exact</em> posterior samples from the joint
+posterior distribution <span class="math inline">\(p(\beta,\sigma^2 \mid
+y)\)</span> using <strong>Composition Sampling.</strong> Before, getting
+into the specifics of sampling from this posterior distribution, here is
+a brief overview of compostion sampling.</p>
+<div id="composition-sampling-overview" class="section level3">
+<h3>Composition Sampling Overview</h3>
+<p>Composition sampling provides a method to draw exact samples from a
+joint distribution by utilizing marginal and conditional sampling. For
+two random variables <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> with a joint density function <span class="math inline">\(f(X,Y)\)</span>, the density at <span class="math inline">\((x,y)\)</span> can be written as <span class="math inline">\(f_{X,Y}(x,y) = f_X(x)f_{Y|X}(y|x)\)</span>.
+Suppose we can draw samples from <span class="math inline">\(f_X\)</span> and <span class="math inline">\(f_{Y|X}\)</span> for any given <span class="math inline">\(X = x\)</span>. To generate <span class="math inline">\(N\)</span> samples from this joint distribution,
+one first draws a sample <span class="math inline">\(X_i^* = x_i \sim
+f_X\)</span> from the marginal distribution of <span class="math inline">\(X\)</span> for <span class="math inline">\(i = 1,
+\dots, N\)</span>. Then, for each drawn value <span class="math inline">\(x_i\)</span>, a subsequent sample <span class="math inline">\(Y_i^* \sim f_{Y|X}(\cdot \mid x_i)\)</span> is
+drawn for <span class="math inline">\(i = 1, \dots, N\)</span>.</p>
+<p>We offer some heuristics on why the distribution of the simulated
+random variables is <span class="math inline">\((X_i^*, Y_i^*)
+\stackrel{ind}{\sim} f_{X,Y}(\cdot, \cdot)\)</span>. It is clear that
+<span class="math inline">\(P(X_i^* \leq u) = \int_{-\infty}^{u}
+f_X(x)dx\)</span> because <span class="math inline">\(X_i^* \sim
+f_X(\cdot)\)</span>, i.e., <span class="math inline">\(X_i^*\)</span>
+has the same distribution as <span class="math inline">\(X\)</span>. And
+<span class="math inline">\(P(Y_i^* \leq v \mid X_i^* = x) =
+\int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dy\)</span> because <span class="math inline">\(Y_i^* \mid (X_i^* = x) \sim f_{Y \mid X}(\cdot
+\mid x)\)</span>. Therefore,</p>
+<p><span class="math display">\[P(X_i^* \leq u, Y_i^* \leq v) =
+\int_{-\infty}^{u} f_X(x) \int_{-\infty}^{v} f_{Y \mid X}(y \mid x)dydx
+= \int_{-\infty}^{u} \int_{-\infty}^{v} f_X(x)f_{Y \mid X}(y \mid x)dydx
+= \int_{-\infty}^{u}\int_{-\infty}^{v} f_{X,Y}(x,y)dydx = P(X \leq u, Y
+\leq v).\]</span></p>
+<p>Hence, <span class="math inline">\((X_i, Y_i) \stackrel{d}{=}
+(X,Y)\)</span>. Since each draw is independent across <span class="math inline">\(i\)</span>, the samples are independent.</p>
+<p>We can apply this method to draw samples from a joint posterior
+distribution,</p>
+<p><span class="math display">\[p(\theta_1, \theta_2 \mid y) =
+p(\theta_1 \mid y) \times p(\theta_2 \mid \theta_1, y).\]</span></p>
+<p>In conjugate models, it is often easy to draw samples from <span class="math inline">\(p(\theta_1 \mid y)\)</span> and from <span class="math inline">\(p(\theta_2 \mid \theta_1, y)\)</span>. We first
+draw <span class="math inline">\(N\)</span> samples <span class="math inline">\(\theta_{1(i)} \sim p(\theta_1 \mid y)\)</span>
+and, for each drawn value <span class="math inline">\(\theta_{1(i)}\)</span>, we draw <span class="math inline">\(\theta_{2(i)} \sim p(\theta_2 \mid \theta_{1(i)},
+y)\)</span>.</p>
+<hr />
+<p>We now apply composition sampling to the conjugate posterior. We
+first draw <span class="math inline">\(\sigma^2 \sim p(\sigma^2 \mid
+y)\)</span> and then draw <span class="math inline">\(\beta \sim p(\beta
+\mid y, \sigma^2)\)</span> using the previously drawn value of <span class="math inline">\(\sigma^2\)</span>. <strong>Algorithm 1</strong>
+presents the steps for drawing <span class="math inline">\(N\)</span>
+posterior samples from <span class="math inline">\(p(\beta, \sigma^2
+\mid y)\)</span>.</p>
 <p><strong>Algorithm 1:</strong> Exact posterior sampling from <span class="math inline">\(p(\beta, \sigma^2 \mid y)\)</span></p>
 <ol style="list-style-type: decimal">
 <li><strong>For</strong> <span class="math inline">\(i\)</span> in <span class="math inline">\(1:N\)</span>:</li>
@@ -423,6 +471,7 @@ IG(a^*,b^*)\)</span></li>
 \beta_{(i)}\right)_{i=1,2,\ldots, N}\)</span></li>
 </ol>
 <hr />
+</div>
 <div id="theoretical-derivations-pbetasigma2mid-y-propto-pbeta-mid-sigma2-y-times-psigma2-mid-y" class="section level3">
 <h3>Theoretical Derivations: <span class="math inline">\(p(\beta,\sigma^2\mid y) \propto p(\beta \mid
 \sigma^2, y) \times p(\sigma^2 \mid y)\)</span></h3>
