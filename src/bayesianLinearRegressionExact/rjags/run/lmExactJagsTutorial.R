@@ -60,10 +60,8 @@ run_replicated_jags_composition <- function(X, Y,
   sigma2_samples <- 1 / tau_samples
   
   # 3. Precompute 3D precision array in R to bypass JAGS DAG compilation overhead
-  beta_prec_array <- array(NA, dim = c(M_samples, P, P))
-  for (m in 1:M_samples) {
-    beta_prec_array[m, , ] <- M0_inv * tau_samples[m] 
-  }
+  # Vectorized array multiplication replaces the slow for-loop
+  beta_prec_array <- array(rep(M0_inv, each = M_samples), dim = c(M_samples, P, P)) * tau_samples
   
   # 4. Replicate Data Matrix Y_rep (M_samples x N)
   Y_rep <- matrix(Y, nrow = M_samples, ncol = N, byrow = TRUE)
