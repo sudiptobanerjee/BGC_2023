@@ -1,0 +1,169 @@
+---
+title: "Univariate spatial regression: Bartlett Experimental Forest (BEF) analysis"
+output: html_document
+---
+
+
+```{r global_options, echo=FALSE}
+knitr::opts_chunk$set(comment = NA, tidy = TRUE)
+```
+
+1. Load the libraries to be used
+```{r}
+library(sf)
+library(terra)
+library(raster)
+library(spBayes)
+library(MBA)
+library(geoR)
+library(fields)
+library(maptools)
+library(classInt)
+library(lattice)
+```
+
+2. Data preliminaries: Load the data from the "spBayes" package. Create the response variable for biomass in kilograms per hour (KGH), which measures the rate at which woody biomass is consumed or produced. The response is transformed to the logarithmic scale.  
+```{r}
+data(BEF.dat)
+befDat <- BEF.dat[BEF.dat$ALLBIO02_KGH>0,]
+bio <- befDat$ALLBIO02_KGH*0.001;
+logBio <- log(bio)
+```
+
+3. Extract the coordinates
+```{r}   
+befCoords <- as.matrix(befDat[,c("XUTM","YUTM")])
+```
+
+4. Create a surface plot using the Multilevel B-spline Approximation (MBA).
+```{r}   
+xRes <- 100; yRes <- 100
+surf <- mba.surf(cbind(befCoords, bio), no.X=xRes, no.Y=yRes, h=5, m=2, extend=FALSE)$xyz.est
+image.plot(surf, xaxs = "r", yaxs = "r", xlab="Easting (m)", ylab="Northing (m)", main="Biomass in metric tonnes")
+points(befCoords)
+```
+
+5. Start with a simple Ordinary Least Squares (OLS) regression. 
+```{r}
+model <- logBio~ELEV+SLOPE+SUM_02_TC1+SUM_02_TC2+SUM_02_TC3
+modelFit <- lm(model, data=befDat)
+modelFitSummary <- summary(modelFit)
+print(modelFitSummary) ##Print summary of classical OLS model fit
+bioResid = resid(modelFit) ##Store residuals from the OLS model fit for later use
+```
+
+6. Prepare for the Bayesian modeling. Extract the number of regression coefficients and create a flat non-informative prior for the regression coefficients. 
+```{r}
+p <- length(coefficients(modelFit)) ## This is the number of columns in the design matrix
+## Set the prior mean and precision for the regression
+betaPriorMean <- as.matrix(rep(0, times=p))
+betaPriorPrecision <- matrix(0, nrow=p, ncol=p)
+```
+
+7. Prepare the fixed inputs for "bayesGeostatExact" function.
+```{r}   
+phi <- 0.014 ## Set the spatial range (from the variogram)
+alpha <- 0.016/0.08 ## Set the nugget/partial-sill ratio
+sigmaSqPriorShape <- 2.0 ## Set IG shape for sigma.sq (partial sill)
+sigmaSqPriorRate <- 0.08 ## Set IG scale for sigma.sq (partial sill)
+```
+
+8. Run bayesGeostatExact to deliver exact posterior samples
+```{r}   
+spExact <- bayesGeostatExact(model,
+data=befDat, coords=befCoords, n.samples=1000,
+beta.prior.mean=betaPriorMean,
+beta.prior.precision=betaPriorPrecision,
+cov.model="exponential",
+phi=phi, alpha=alpha,
+sigma.sq.prior.shape=sigmaSqPriorShape,
+sigma.sq.prior.rate=sigmaSqPriorRate,
+sp.effects=TRUE)
+```
+
+9. Produce the posterior summaries from "bayesGeostatExact"
+```{r}
+round(summary(spExact$p.samples)$quantiles,3)
+```
+
+10. Run spLM to deliver MCMC samples from marginal posterior distributions
+```{r}   
+nSamples <- 1000
+befSp <- spLM(model, data=befDat, coords=befCoords, starting=list("phi"=3/200,"sigma.sq"=0.08, "tau.sq"=0.02), tuning=list("phi"=0.1, "sigma.sq"=0.05, "tau.sq"=0.05), priors=list("phi.Unif"=c(3/1500, 3/50), "sigma.sq.IG"=c(2, 0.08),"tau.sq.IG"=c(2, 0.02)), cov.model="exponential",n.samples=nSamples)
+```
+
+11. Produce the posterior summaries from "spLM"
+```{r}   
+print(round(summary(befSp$p.theta.samples)$quantiles,3))
+```
+
+12. Recover spatial residuals using "spRecover"
+```{r}   
+burnIn <- floor(0.75*nSamples)
+befSp <- spRecover(befSp, start=burnIn, thin=2)
+```
+
+13. The posterior samples of the regression coefficients and the spatial effects can then be obtained.
+```{r}   
+betaSamples = befSp$p.beta.recover.samples
+wSamples = befSp$p.w.recover.samples
+```
+
+14. Obtain trace plots for regression coefficients
+```{r}
+par(mfrow=c(3,2))
+plot(betaSamples, auto.layout=TRUE, density=FALSE)
+```
+
+15. Obtain posterior means and sd's of spatial residuals for each location
+```{r}
+wHatMu <- apply(wSamples,1,mean)
+wHatSd <- apply(wSamples,1,sd)
+```
+
+16. Plot the OLS residual surface and a map of the posterior mean of spatial effects
+```{r}   
+par(mfrow=c(1,2))
+surfResid <- mba.surf(cbind(befCoords, bioResid), no.X=xRes, no.Y=yRes, extend=FALSE)$xyz.est
+zLim <- range(surfResid[["z"]], na.rm=TRUE)
+image.plot(surfResid, xaxs = "r", yaxs = "r", zlim=zLim, main="OLS residuals")
+surfSpatMean <- mba.surf(cbind(befCoords, wHatMu), no.X=xRes, no.Y=yRes, extend=FALSE)$xyz.est
+zLim <- range(surfSpatMean[["z"]], na.rm=TRUE)
+image.plot(surfSpatMean, xaxs = "r", yaxs = "r", zlim=zLim, main="Posterior mean spatial effects")
+```
+
+17. Introduce a shapefile for a region of interest where we wish to interpolate. Read the shapefile. 
+```{r}   
+befShp <- st_read("../data/BEF-data/BEF_bound.shp")
+```
+
+18. Carry out spatial interpolation supervised by the points with observations
+```{r}
+surfOut <- mba.surf(cbind(befCoords, logBio), no.X=xRes, no.Y=yRes, extend=TRUE)$xyz.est
+zLim <- range(surfOut[["z"]], na.rm=TRUE)
+```
+
+19. Map the interpolated values from MBA output
+```{r}
+image.plot(surfOut, axes=TRUE, zlim=zLim, col=tim.colors(25), xaxs = "r", yaxs = "r", 
+main="Log metric tons of biomass")
+```
+
+20. OPTIONAL: How to create a data frame with all grid point combinations
+```{r}
+gridCoords <- expand.grid(x = surfOut$x, y = surfOut$y)
+interpolatedValues <- as.vector(surfOut$z)
+surfDf <- cbind(gridCoords, z = interpolatedValues)
+dim(surfDf)
+head(surfDf)
+```
+
+21. Here is how we can clip images to fit within a polygon from a shapefile
+```{r}
+surfOutRaster <- raster(surfOut$z, xmn=min(surfOut$x), xmx=max(surfOut$x), ymn=min(surfOut$y), ymx=max(surfOut$y))
+surfOutClipped <- mask(surfOutRaster, befShp)
+plot(surfOutClipped, col=tim.colors(25), xaxs="r", yaxs="r", main="Log metric tons of 
+biomass: Within polygon")
+# Optional Overlay the polygon boundary
+plot(st_geometry(befShp), add = TRUE, border = "red")
+```   

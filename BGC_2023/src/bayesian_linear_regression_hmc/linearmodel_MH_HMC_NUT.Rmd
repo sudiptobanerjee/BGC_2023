@@ -1,0 +1,1778 @@
+---
+title: "Simple Linear Model"
+author: "Hang Zeng"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#package and data
+library(mcmc)
+library(magic)
+library(tidyverse)
+library(caret)
+library(GGally)
+source("algorithms_hoffman_NUTS.R")
+
+```
+
+# Simple linear model I
+
+```{r}
+# import data
+Y <- read.table("Y.txt", header=F)
+Y <- Y[,1]
+X <- as.matrix(read.table("X.txt", header=F))
+```
+
+```{r}
+simple.lm <- lm(Y ~ X[,2]+X[,3]+X[,4])
+simple.lm.summary <- summary(simple.lm)
+simple.lm.summary
+
+no.parameters = ncol(X)+1
+```
+
+```{r}
+coef1 <- data.frame(simple.lm.summary$coefficients[,1])
+rownames(coef1)<- paste0("beta", c(1:4))
+colnames(coef1) <- c("est")
+
+sigma2 <- data.frame(simple.lm.summary$sigma^2)
+colnames(sigma2 ) <- c("est")
+rownames(sigma2) <- c("sigma2")
+
+coef1 <- data.frame(rbind(coef1,sigma2))
+coef1$pred <- rownames(coef1)
+```
+
+## Log likelihood and corresponding gradients
+
+Suppose $\alpha = \log \sigma^2$. Then log likelihood is
+$$L(\beta,\alpha) =  -(a+1+\frac{n}{2})\alpha + \alpha - \exp(-\alpha)[b+\frac{1}{2}(Y-X\beta)^T(Y-X\beta)]$$
+
+Gradients:
+
+- $\frac{dL}{d\beta} = \exp(-\alpha)(X^TY-X^TX\beta)$
+
+- $\frac{dL}{d\alpha} = -(a+n/2)+\exp(-\alpha)[b+\frac{1}{2}(Y-X\beta)^T(Y-X\beta)]$
+
+
+```{r}
+## LL_log
+target <- function (theta, a=2,b=0.1)
+{
+  beta <- theta[1:ncol(X)]
+  sigmasq <- exp(theta[length(theta)])
+
+  out <- -(a+1+length(Y)/2.0) * log(sigmasq) + log(sigmasq) - (1/sigmasq)*(b + 0.5*t(Y-X%*%beta)%*%(Y-X%*%beta))
+
+  return(out)
+}
+
+myscale = vcov(simple.lm)
+myscale = diag(c(diag(myscale),2.5e-3))
+myscale <- chol(myscale)
+```
+
+Inital values, iterations, burnin, and batch length:
+
+```{r}
+inits <- rep(0, times=no.parameters)
+NITER <- 50000
+start <- 30001
+BatchLength <- 1
+```
+
+## MH MCMC
+
+```{r}
+set.seed(1234)
+start_time <- Sys.time()
+
+metrop.out <- metrop(target, initial=inits, nbatch=NITER, blen=BatchLength, scale=myscale, a=2.0, b=0.10)
+
+end_time <- Sys.time()
+end_time - start_time
+```
+
+
+### MH quantile
+
+```{r}
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.MH <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.MH <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.MH)) {
+  beta.qnt.MH[i,] <- quantile(metrop.out$batch[start:nrow(metrop.out$batch),i],myqnt)
+}
+
+beta.qnt.MH
+
+sigmasq.qnt.MH <- quantile(exp(metrop.out$batch[start:nrow(metrop.out$batch),no.parameters]),myqnt)
+
+sigmasq.qnt.MH
+```
+
+```{r}
+MH_out <- metrop.out$batch[start:nrow(metrop.out$batch),]
+colnames(MH_out)<- c(paste0("beta", c(1:4)), "sigma2")
+MH_out <- data.frame(MH_out)
+MH_out$sigma2 <- exp(MH_out$sigma2)
+MH_out_l<- MH_out%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_MH <- MH_out_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+MH_out_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 30)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_MH, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## HMC
+
+```
+log_joint_density <- function(theta, r, LL_log){
+  return(LL_log(theta) - sum(r^2)/2)
+}
+
+Leapfrog_HMC <- function (theta, r, epsilon, LL_log, grad_LL_log){
+  r_tilde = r + (epsilon/2) * grad_LL_log(theta,a = 2, b = 0.1)
+  theta_tilde = theta + epsilon * r_tilde
+  r_tilde = r_tilde + (epsilon / 2 ) * grad_LL_log(theta_tilde, a = 2, b = 0.1)
+  return(list(theta_tilde = theta_tilde, r_tilde = r_tilde))
+}
+
+HMCOne <- function (current_theta, epsilon, L, LL_log, grad_LL_log){
+  #theta=theta0
+  #resample momentum from standard multivariate normal; Gibbs smapling uodate
+  current_r = rnorm(length(current_theta),0,1)
+  theta_p = current_theta
+  r_p = current_r
+  theta = current_theta
+  
+  # apply L leapfrog updates to position theta and momentum r
+  # generate a proposal pair (theta_tilde, r_tilde)
+  for (i in 1:L){
+    #i=1
+    list1 <- Leapfrog_HMC(theta_p, r_p, epsilon, LL_log, grad_LL_log)
+    theta_p <- list1$theta_tilde
+    r_p <- list1$r_tilde
+  }
+  
+  #accept or reject the proposal: MH
+  log_prop <- log_joint_density(theta_p, r_p, LL_log)
+  log_current <- log_joint_density(current_theta, current_r, LL_log)
+  accept_prob <- min(1,exp(log_prop - log_current))
+  
+  if (accept_prob == 0|is.nan(accept_prob)| is.na(accept_prob)){
+    accept_prob <- runif(1,0,0.0001)}
+  
+  if (accept_prob > runif(1)){theta = theta_p}
+  
+  return(theta)
+}
+
+HMC <- function (theta_0, epsilon, L, LL_log, grad_LL_log, M){
+  
+  theta_list = matrix(c(0), nrow = M, ncol = length(theta_0))
+  theta_list[1,] <- theta_0
+  
+  for (m in c(2:M)){
+    #m=4
+    current_theta <- theta_list[m-1,]
+    theta_list[m,] <- HMCOne(current_theta, epsilon, L, LL_log, grad_LL_log) 
+  }
+  
+  theta_list[]
+  
+}
+```
+
+```{r}
+## LL_log
+target <- function(theta, a=2,b=0.1){
+  beta <- theta[1:ncol(X)]
+  sigmasq <- exp(theta[length(theta)])
+  
+  out <- -(a+1+length(Y)/2.0) * log(sigmasq) + log(sigmasq) - (1/sigmasq)*(b + 0.5*t(Y-X%*%beta)%*%(Y-X%*%beta))
+  
+  return(out)
+}
+
+## grad_LL_log
+target_gradient<- function(theta, a=2, b=0.1){
+  beta <- as.matrix(theta[1:ncol(X)])
+  alpha <- theta[length(theta)]
+  
+  beta_grad <- exp(-alpha)*(t(X)%*%Y- t(X)%*%X %*% beta)
+  log_sigmasq_grad <- -(a+length(Y)/2.0) + exp(-alpha)*(b + 0.5*t(Y-X%*%beta)%*%(Y-X%*%beta))
+  
+  out_grad = t(rbind(beta_grad,log_sigmasq_grad))
+  
+  return(out_grad)
+}
+```
+
+```{r}
+
+start_time <- Sys.time()
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+theta_list_HMC<-HMC(theta_0, epsilon = 0.01, L = 60, LL_log = target,
+                grad_LL_log= target_gradient,M = 1000)
+
+end_time <- Sys.time()
+end_time - start_time
+
+```
+
+### ACF and Time Series Plot
+
+```{r}
+theta_list_HMC <- data.frame(theta_list_HMC[-c(1:100),])
+
+#acf
+par(mfrow=c(2,3))
+acf(theta_list_HMC[,1], xlab = "beta1", main="")
+acf(theta_list_HMC[,2], xlab = "beta2", main="")
+acf(theta_list_HMC[,3], xlab = "beta3", main="")
+acf(theta_list_HMC[,4], xlab = "beta4", main="")
+acf(theta_list_HMC[,5], xlab = "sigma2", main="")
+
+#time series
+#acf
+par(mfrow=c(2,3))
+plot(c(1:nrow(theta_list_HMC)),theta_list_HMC[,1], xlab = "beta1", main="", type="l")
+plot(c(1:nrow(theta_list_HMC)),theta_list_HMC[,2], xlab = "beta2", main="",type="l")
+plot(c(1:nrow(theta_list_HMC)),theta_list_HMC[,3], xlab = "beta3", main="", type="l")
+plot(c(1:nrow(theta_list_HMC)),theta_list_HMC[,4], xlab = "beta4", main="", type="l")
+plot(c(1:nrow(theta_list_HMC)),theta_list_HMC[,5], xlab = "sigma2", main="", type="l")
+```
+
+### HMC quantile
+
+```{r}
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.HMC <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.HMC <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMC)) {
+  beta.qnt.HMC[i,] <- quantile(theta_list_HMC[,i],myqnt)
+}
+
+beta.qnt.HMC
+
+sigmasq.qnt.HMC <- quantile(exp(theta_list_HMC[, no.parameters]),myqnt)
+
+sigmasq.qnt.HMC 
+```
+
+```{r}
+colnames(theta_list_HMC)<- c(paste0("beta", c(1:4)), "sigma2")
+
+theta_list_HMC$sigma2 <- exp(theta_list_HMC$sigma2)
+
+theta_list_HMC_l<- theta_list_HMC%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_theta_list_HMC <- theta_list_HMC_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+theta_list_HMC_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_MH, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## Naive NUTS
+
+```
+Leapfrog <- function (theta, r, epsilon, grad_LL_log){
+  r_tilde = r + (epsilon/2) * grad_LL_log(theta,a = 2, b = 0.1)
+  theta_tilde = theta + epsilon * r_tilde
+  r_tilde = r_tilde + (epsilon / 2 ) * grad_LL_log(theta_tilde, a = 2, b = 0.1)
+  return(list(theta_tilde = theta_tilde, r_tilde = r_tilde))
+}
+
+BuildTree <- function (theta, r, u, v, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log){
+  if (j == 0){
+    
+    list1 <- Leapfrog (theta, r, epsilon = v * epsilon, grad_LL_log)
+    theta_p = list1$theta_tilde
+    r_p = list1$r_tilde
+    
+    log_prop = log_joint_density(theta_p, r_p, LL_log)
+    mar_prob = exp(log_prop)
+    if (mar_prob <= 0| is.nan(mar_prob)| is.na(mar_prob)){mar_prob = runif(1,0,0.001)}
+    
+    if (u <= mar_prob){C_p = list(theta=theta_p, r=r_p)}else{
+      C_p = list(theta=theta, r=r)
+    }
+    
+    s_criteria = log(u) - sigma_max # recommend: sigma_max = 1000
+    s_p = ifelse(log_prop > s_criteria, 1, 0)
+    
+    return(list(theta_b = theta_p, r_b = r_p, theta_f = theta_p, r_f = r_p, C_p = C_p, s_p = s_p))}
+  else{
+    #j=1
+    list2 <- BuildTree(theta, r, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+    theta_b = list2$theta_b
+    r_b = list2$r_b
+    theta_f = list2$theta_f
+    r_f = list2$r_f
+    C_p = list2$C_p
+    s_p = list2$s_p
+    
+    if (v == -1){
+      list3 <- BuildTree(theta_b, r_b, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+      theta_b = list3$theta_b
+      r_b = list3$r_b}else{
+        list3 <- BuildTree(theta_f, r_f, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+        theta_f = list3$theta_f
+        r_f = list3$r_f
+      }
+    
+    C_p2 = list3$C_p
+    s_p2 = list3$s_p
+    
+    ip1<- sum((theta_f - theta_b)* r_b)
+    sc1 = ifelse(ip1 >= 0, 1, 0)
+    ip2<- sum((theta_f - theta_b)* r_f)
+    sc2 = ifelse(ip2 >= 0, 1, 0)
+    
+    s_p =  s_p2 *sc1 * sc2
+  
+
+    C_p$theta <- unique(rbind(C_p$theta, C_p2$theta))
+    C_p$r <- unique(rbind(C_p$r, C_p2$r))
+    
+    return(list(theta_b = theta_b, r_b = r_b, theta_f = theta_f, r_f = r_f,
+                C_p = C_p, s_p = s_p))
+  }
+}
+
+## u: slice variable
+## C: candidate position-momentum states
+## B: set of allposiiton-momentum states that leapfrog trace out
+NaiveNUTOne <- function (current_theta, epsilon, LL_log, grad_LL_log, sigma_max = 1000){
+  
+  current_r <-rnorm(length(current_theta),0,1)
+  
+  log_current <- log_joint_density(current_theta, current_r, LL_log)
+  joint_current <- exp(log_current)
+  if (joint_current == 0| is.nan(joint_current)| is.na(joint_current)){
+    u <- 0 }else{
+    u <- runif(1, 0, joint_current)}
+  
+  theta_b = current_theta
+  theta_f = current_theta
+  r_b = current_r
+  r_f = current_r
+  j = 0 # current height of tree
+  C = list(theta = current_theta, r = current_r)
+  s = 1
+  
+  while (s == 1) {
+    v_j = sample(c(-1,1),1)
+    
+    if (v_j == -1){
+      listb <- BuildTree(theta_b, r_b, u, v = v_j, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+      theta_b<- listb$theta_b
+      r_b <- listb$r_b
+    }else{
+      listb <- BuildTree(theta_f, r_f, u, v= v_j, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+      theta_f<- listb$theta_f
+      r_f <- listb$r_f
+    }
+    
+    C_p <- listb$C_p
+    s_p <- listb$s_p
+    
+    if (s_p == 1 |!is.nan(s_p)){
+      C$theta <- rbind(C$theta,C_p$theta)
+      C$r <- rbind(C$r, C_p$r)
+    }
+    
+    ip1<- sum((theta_f - theta_b)* r_b)
+    sc1 = ifelse(ip1 >= 0, 1, 0)
+    ip2<- sum((theta_f - theta_b)* r_f)
+    sc2 = ifelse(ip2 >= 0, 1, 0)
+    
+    s = s_p * sc1 * sc2
+    
+    if(is.na(s)){s = 0}
+    
+    j = j + 1
+  }
+  
+  theta = C$theta[sample(1:nrow(C$theta),1),]
+  return(list(theta=theta))
+}
+
+NaiveNUT <- function(theta_0, epsilon, LL_log, grad_LL_log, M, sigma_max = 1000){
+  theta_list = matrix(c(0), nrow = M, ncol = length(theta_0))
+  theta_list[1,] <- theta_0
+  
+  for (m in c(2:M)){
+    #m=2
+    current_theta <- theta_list[m-1,]
+    theta_list[m,] <- NaiveNUTOne(current_theta, epsilon, LL_log, grad_LL_log, sigma_max)$theta
+  }
+  
+  theta_list[]
+}
+```
+
+
+```{r}
+start_time <- Sys.time()
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_NaiveNUT <- NaiveNUT(theta_0, epsilon=0.01, LL_log = target,
+                                grad_LL_log= target_gradient,
+                                M = 2000, sigma_max = 1000)
+
+end_time <- Sys.time()
+paste0(round(end_time - start_time, 3), " secs for 2000 iterations")
+```
+
+### Naive NUTS Quantile
+
+```{r}
+theta_list_NaiveNUT <- data.frame(theta_list_NaiveNUT[-c(1:100),])
+
+beta.qnt.NaiveNUT <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.NaiveNUT <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.NaiveNUT)) {
+  beta.qnt.NaiveNUT[i,] <- quantile(theta_list_NaiveNUT[,i],myqnt)
+}
+
+beta.qnt.NaiveNUT
+
+sigmasq.qnt.NaiveNUT <- quantile(exp(theta_list_NaiveNUT[, no.parameters]),myqnt)
+sigmasq.qnt.NaiveNUT
+```
+
+```{r}
+colnames(theta_list_NaiveNUT)<- c(paste0("beta", c(1:4)), "sigma2")
+
+theta_list_NaiveNUT$sigma2 <- exp(theta_list_NaiveNUT$sigma2)
+
+theta_list_NaiveNUT_l<- theta_list_NaiveNUT%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_NaiveNUT <- theta_list_NaiveNUT_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+theta_list_NaiveNUT_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_NaiveNUT, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## Efficient NUTS 
+
+```
+BuildTree2 <- function (theta, r, u, v, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log){
+  if (j == 0){
+    
+    list1 <- Leapfrog (theta, r, epsilon = v * epsilon, grad_LL_log)
+    theta_p = list1$theta_tilde
+    r_p = list1$r_tilde
+    
+    log_prop = log_joint_density(theta_p, r_p, LL_log)
+    n_p = ifelse(u <= exp(log_prop),1,0)
+    
+    s_criteria = log(u) - sigma_max # recommend: sigma_max = 1000
+    s_p = ifelse(log_prop > s_criteria, 1, 0)
+    
+    return(list(theta_b = theta_p, r_b = r_p, theta_f = theta_p, r_f = r_p, 
+                theta_p = theta_p, n_p = n_p, s_p = s_p))}
+  else{
+    #j=1
+    list2 <- BuildTree2(theta, r, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+    theta_b = list2$theta_b
+    r_b = list2$r_b
+    theta_f = list2$theta_f
+    r_f = list2$r_f
+    theta_p = list2$theta_p
+    n_p = list2$n_p
+    s_p = list2$s_p
+    
+    if (s_p == 1){
+      if (v == -1){
+        list3 <- BuildTree2(theta_b, r_b, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+        theta_b = list3$theta_b
+        r_b = list3$r_b}
+      else{
+        list3 <- BuildTree2(list2$theta_f, list2$r_f, u, v, j-1, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+        theta_f = list3$theta_f
+        r_f = list3$r_f
+      }
+      
+      theta_p2 = list3$theta_p
+      n_p2 = list3$n_p
+      s_p2 = list3$s_p
+    
+      n_cri <- n_p2/(n_p+n_p2)
+      
+      if (runif(1) < n_cri ){
+        theta_p = theta_p2
+      }
+      
+      ip1<- sum((theta_f - theta_b)* r_b)
+      sc1 = ifelse(ip1 >= 0, 1, 0)
+      ip2<- sum((theta_f - theta_b)* r_f)         
+      sc2 = ifelse(ip2 >= 0, 1, 0)
+      
+      s_p = s_p2 *sc1 * sc2
+      n_p = n_p + n_p2
+      
+      #if(is.na(s_p)| is.nan(s_p)){s_p = 0}
+    }
+    
+    return(list(theta_b = theta_b, r_b = r_b, theta_f = theta_f, r_f = r_f,
+                theta_p = theta_p, n_p = n_p, s_p = s_p))
+  }
+}
+
+EffNUTOne <- function (current_theta, epsilon, LL_log, grad_LL_log, sigma_max = 1000){
+  
+  current_r <-rnorm(length(current_theta),0,1)
+  
+  log_current <- log_joint_density(current_theta, current_r, LL_log)
+  mar_prob_current <- exp(log_current)
+  
+  if (mar_prob_current == 0| is.nan(mar_prob_current) |is.na(mar_prob_current)){
+    u <- 0}else{
+    u <- runif(1, 0, mar_prob_current)}
+  
+  theta_b = current_theta
+  theta_f = current_theta
+  r_b = current_r
+  r_f = current_r
+  j = 0
+  #theta = current_theta
+  n = 1
+  s = 1
+  
+  while (s == 1) {
+    v_j = sample(c(-1,1),1)
+    
+    if (v_j == -1){
+      listb <- BuildTree2(theta_b, r_b, u, v = v_j, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+      theta_b<- listb$theta_b
+      r_b <- listb$r_b
+    }else{
+      listb <- BuildTree2(theta_f, r_f, u, v= v_j, j, epsilon, sigma_max = 1000, LL_log, grad_LL_log)
+      theta_f<- listb$theta_f
+      r_f <- listb$r_f
+    }
+    
+    n_p <- listb$n_p
+    s_p <- listb$s_p
+    theta_p <- listb$theta_p
+    
+    #if (is.nan(n_p) | is.na(n_p)){n_p <- 0}
+    #if (is.nan(s_p) | is.na(s_p)){s_p <- 0}
+    
+    #alpha = min(1, n_p/n)
+    #if (s_p == 1 && runif(1) < alpha){return(theta_p)}else{return(current_theta)}
+    
+    if (s_p == 1){alpha = min(1, n_p/n)
+      if (runif(1) < alpha){return(theta_p)}else{return(current_theta)}}
+    
+    n = n + n_p
+    ip1<- sum((theta_f - theta_b)* r_b)
+    sc1 = ifelse(ip1 >= 0, 1, 0)
+    ip2<- sum((theta_f - theta_b)* r_f)
+    sc2 = ifelse(ip2 >= 0, 1, 0)
+    
+    s = s_p * sc1 * sc2
+    
+    j = j + 1
+  }
+  
+}
+
+EffNUT <- function(theta_0, epsilon, LL_log, grad_LL_log, M, sigma_max = 1000){
+  theta_list = matrix(c(0), nrow = M, ncol = length(theta_0))
+  theta_list[1,] <- theta_0
+  
+  for (m in c(2:M)){
+    #m=3
+    current_theta <- theta_list[m-1,]
+    theta_list[m,] <- EffNUTOne(current_theta, epsilon, LL_log, grad_LL_log, sigma_max)
+  }
+  
+  theta_list[]
+}
+```
+
+```{r}
+start_time <- Sys.time()
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_EffNUT <- EffNUT(theta_0, epsilon=0.01, LL_log = target,
+                                grad_LL_log= target_gradient,
+                                M = NITER, sigma_max = 1000)
+
+end_time <- Sys.time()
+
+paste0(round(end_time - start_time, 3), " secs for ", NITER," iterations")
+```
+
+### Efficient NUTS Quantile
+
+```{r}
+beta.qnt.EffNUT <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.EffNUT <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.EffNUT)) {
+  beta.qnt.EffNUT[i,] <- quantile(theta_list_EffNUT[start:NITER,i],myqnt)
+}
+
+beta.qnt.EffNUT
+
+sigmasq.qnt.EffNUT <- quantile(exp(theta_list_EffNUT[start:NITER, no.parameters]),myqnt)
+sigmasq.qnt.EffNUT
+```
+
+```{r}
+theta_effNut <- data.frame(theta_list_EffNUT[start:NITER,])
+colnames(theta_effNut)<- c(paste0("beta", c(1:4)), "sigma2")
+
+theta_effNut$sigma2 <- exp(theta_effNut$sigma2)
+
+theta_effNut_l<- theta_effNut%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_EffNUT <- theta_effNut_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+theta_effNut_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_EffNUT, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## Find reasonable initial epsilon
+
+```
+FindReasonableEpsilon <- function(theta, LL_log, grad_LL_log){
+  epsilon = 1 #default 1
+  r = rnorm(length(theta))
+  
+  leap_list <- Leapfrog(theta, r, epsilon, grad_LL_log =  grad_LL_log)
+  theta_p <- leap_list$theta_tilde
+  r_p <- leap_list$r_tilde
+  
+  log_current <- log_joint_density(theta, r, LL_log)
+  log_prop <- log_joint_density(theta_p, r_p, LL_log)
+  prob <- exp(log_prop - log_current)
+  if (prob <= 0| is.nan(prob) | is.na(prob)){prob <- runif(1,0,0.0001)}
+  
+  a = 2 * ifelse(prob > 0.5, 1, 0) - 1
+  j = 0
+  
+  while ((prob^a > 2^(-a)) & (epsilon > 0)){
+    epsilon <- 2^a * epsilon
+    
+    lista <- Leapfrog(theta, r, epsilon, grad_LL_log)
+    theta_p <- lista$theta_tilde
+    r_p <- lista$r_tilde
+   
+    log_current <- log_joint_density(theta, r, LL_log)
+    log_prop <- log_joint_density(theta_p, r_p, LL_log)
+    prob <- exp(log_prop - log_current)
+    if (prob <= 0| is.nan(prob) | is.na(prob)){prob <- runif(1,0,0.0001)}
+    
+    j= j+1
+  }
+  
+  return(epsilon)
+}
+```
+
+## HMC with Dual Averaging
+
+```
+HMCDualAvgOne <- function(m, current_theta, current_epsilon, current_epsilon_bar, current_H_bar, 
+                          delta, lambda, LL_log, M_adapt, grad_LL_log, epsilon_bar_list,
+                          mu, gamma, t_0, K){
+  
+  r_0 = rnorm(length(current_theta),0,1)
+  theta = current_theta
+  theta_t = current_theta
+  r_t =r_0
+  
+  if (current_epsilon <= 0.2) {L_m = max(1, lambda/runif(1,0.2,0.5))} else{
+    L_m = max(1, round(lambda/current_epsilon))
+  }
+  
+  for (i in c(1:L_m)){
+    list_o <- Leapfrog(theta_t, r_t, current_epsilon, grad_LL_log= grad_LL_log)
+    theta_t <- list_o$theta_tilde
+    r_t <- list_o$r_tilde
+    }
+  
+  prob = exp(LL_log(theta_t) - sum(r_t^2)/2-LL_log(current_theta) + sum(r_0^2)/2)
+  if (prob == 0 | is.nan(prob) | is.na(prob)){prob <- runif(1,0.01,0.2)}
+  
+  a_cri = min(1,prob)
+  
+  if (runif(1) < a_cri){theta = theta_t}
+  
+  if (m <= M_adapt){
+    H_bar = (1 - 1/(m+t_0))*current_H_bar + 1/(m+t_0)*(delta - a_cri)
+    epsilon = exp(mu -sqrt(m)/ gamma * H_bar)
+    epsilon_bar = exp(m^(-K)*log(epsilon)+ (1-m^(-K))*log(current_epsilon_bar))}else{
+    epsilon = epsilon_bar_list[M_adapt,]
+    H_bar = (1 - 1/(m+t_0))*current_H_bar + 1/(m+t_0)*(delta - a_cri)
+    epsilon_bar = exp(m^(-K)*log(epsilon)+ (1-m^(-K))*log(current_epsilon_bar))
+    }  
+  
+  return(list(theta = theta, epsilon = epsilon, 
+              epsilon_bar = epsilon_bar, H_bar = H_bar))
+  
+}
+
+# delta: target mean acceptance prob
+# lambda: target simulation length ~ epsilon*L
+# M_adapt: number of iterations after which to stop the adaption
+
+HMCDualAvg <- function(theta_0, delta, lambda, LL_log, grad_LL_log, M, M_adapt){
+  #theta
+  theta_list <- matrix(c(0), nrow = M, ncol = length(theta_0))
+  theta_list[1,] <- theta_0
+  #epsilon
+  epsilon0 <- FindReasonableEpsilon(theta_0, LL_log, grad_LL_log)
+  epsilon_list <- matrix(c(0), nrow = M, ncol = length(epsilon0))
+  epsilon_list[1,] <- epsilon0
+  #epsilon_bar 
+  epsilon_bar_0 <- 1
+  epsilon_bar_list <- matrix(c(0), nrow = M, ncol = length(epsilon_bar_0))
+  epsilon_bar_list[1,] <- epsilon_bar_0
+  #H_bar
+  H_bar_0 <- 0
+  H_bar_list <- matrix(c(0), nrow = M, ncol = length(H_bar_0))
+  H_bar_list[1,] <- H_bar_0
+  
+  mu = log(10*epsilon0)
+  gamma = 0.05
+  t_0 = 10
+  K = 0.75
+  
+  for (m in c(2:M)){
+    #m=2
+    current_theta <- theta_list[m-1,]
+    current_epsilon <- epsilon_list[m-1,]
+    current_epsilon_bar <- epsilon_bar_list[m-1,]
+    current_H_bar <- H_bar_list[m-1,]
+    
+    output <- HMCDualAvgOne(m, current_theta, current_epsilon, current_epsilon_bar, current_H_bar, 
+                            delta, lambda, LL_log, M_adapt, grad_LL_log, epsilon_bar_list,
+                            mu, gamma, t_0, K)
+    
+    theta_list[m,] <- output$theta
+    epsilon_list[m,] <- output$epsilon
+    epsilon_bar_list[m,] <- output$epsilon_bar
+    H_bar_list[m,] <- output$H_bar
+  }
+  
+  theta_list[]
+}
+```
+
+```{r}
+
+start_time <- Sys.time()
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_HMCDualAvg <-HMCDualAvg(theta_0, delta = 0.8, lambda = 200, 
+                                   LL_log = target,
+                                   grad_LL_log= target_gradient, 
+                                   M = 1000, M_adapt = 50)
+
+end_time <- Sys.time()
+end_time - start_time
+```
+
+
+### HMC with Dual Averaging
+
+```{r}
+beta.qnt.HMCDualAvg <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.HMCDualAvg <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMCDualAvg)) {
+  beta.qnt.HMCDualAvg[i,] <- quantile(theta_list_HMCDualAvg[,i],myqnt)
+}
+
+beta.qnt.HMCDualAvg
+
+sigmasq.qnt.HMCDualAvg <- quantile(exp(theta_list_HMCDualAvg[, no.parameters]),myqnt)
+sigmasq.qnt.HMCDualAvg
+```
+
+```{r}
+theta_HMCDualAvg <- data.frame(theta_list_HMCDualAvg[-c(1:100),])
+colnames(theta_HMCDualAvg)<- c(paste0("beta", c(1:4)), "sigma2")
+
+theta_HMCDualAvg$sigma2 <- exp(theta_HMCDualAvg$sigma2)
+
+theta_HMCDualAvg_l<- theta_HMCDualAvg%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_HMCDA <- theta_HMCDualAvg_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+theta_HMCDualAvg_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_HMCDA, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## NUTS with Dual Averaging
+
+```
+BuildTree3 <- function (theta, r, u, v, j, epsilon, sigma_max = 1000, 
+                        LL_log, grad_LL_log, theta0, r0){
+  if (j == 0){
+  
+    list1 <- Leapfrog (theta, r, epsilon = v * epsilon, grad_LL_log) # proposal
+    theta_p <- list1$theta_tilde
+    r_p <- list1$r_tilde
+    
+    log_dens_prop = log_joint_density(theta_p, r_p,LL_log)
+    n_p = ifelse(log(u) <= log_dens_prop, 1, 0) # slice?
+    s_p = ifelse(log(u) < sigma_max + log_dens_prop , 1, 0)# accurate simulation?
+    
+    log_dens_current = log_joint_density(theta0, r0, LL_log)
+    ra_dens = exp(log_dens_prop - log_dens_current)
+    
+    a0 = min(1, ra_dens)
+    
+    if (is.nan(a0))stop()
+    if (is.nan(n_p) | is.na(n_p)){n_p <- 0}
+    if (is.nan(s_p) | is.na(s_p)){s_p <- 0}
+    
+    return(list(theta_b = theta_p, r_b = r_p, theta_f = theta_p, r_f = r_p, 
+                theta_p = theta_p, n_p = n_p, s_p = s_p, a_p = a0, n_a_p = 1))}
+  else{
+    #j=1
+    list2 <- BuildTree3(theta, r, u, v, j-1, epsilon, sigma_max = 1000, 
+                        LL_log, grad_LL_log, theta0, r0)
+    theta_b = list2$theta_b
+    r_b = list2$r_b
+    theta_f = list2$theta_f
+    r_f = list2$r_f
+    theta_p = list2$theta_p
+    n_p = list2$n_p
+    s_p = list2$s_p
+    a_p = list2$a_p
+    n_a_p = list2$n_a_p
+    
+    if (s_p == 1){
+      if (v == -1){
+        list3 <- BuildTree3(theta_b, r_b, u, v, j-1, epsilon,  sigma_max = 1000, 
+                            LL_log, grad_LL_log, theta0, r0)
+        theta_b = list3$theta_b
+        r_b = list3$r_b}
+      else{
+        list3 <- BuildTree3(theta_f, r_f, u, v, j-1, epsilon,  sigma_max = 1000, 
+                            LL_log, grad_LL_log, theta0, r0)
+        theta_f = list3$theta_f
+        r_f = list3$r_f
+      }
+      
+      theta_p2 = list3$theta_p
+      n_p2 = list3$n_p
+      s_p2 = list3$s_p
+      a_p2 = list3$a_p
+      n_a_p2 = list3$n_a_p
+      
+      n_s = n_p + n_p2
+      n_cri <- n_p2/n_s
+      
+      if (n_s != 0 && runif(1) < n_cri){theta_p = theta_p2}
+      
+      a_p = a_p + a_p2
+      n_a_p = n_a_p + n_a_p2
+      
+      ip1<- sum((theta_f - theta_b)* r_b)
+      sc1 = ifelse(ip1 >= 0, 1, 0)
+      ip2<- sum((theta_f - theta_b)* r_f)
+      sc2 = ifelse(ip2 >= 0, 1, 0)
+      
+      s_p = s_p2 *sc1 * sc2
+      n_p = n_p + n_p2
+    }
+    
+   # if (is.nan(n_p) | is.na(n_p)){n_p <- 0}
+    #if (is.nan(s_p) | is.na(s_p)){s_p <- 0}
+    
+    return(list(theta_b = theta_b, r_b = r_b, theta_f = theta_f, r_f = r_f,
+                theta_p = theta_p, n_p = n_p, s_p = s_p, a_p = a_p, n_a_p = n_a_p))
+  }
+}
+
+
+NUTDualAvgOne <- function (m, current_theta, current_epsilon, current_epsilon_bar, current_H_bar, 
+                           delta, LL_log, M_adapt, grad_LL_log, 
+                           mu, gamma, t_0, K, epsilon_bar_list){
+  
+  current_r <-rnorm(length(current_theta),0,1)
+  
+  current_joint_dens <- exp(log_joint_density(current_theta, current_r,LL_log))
+  if (is.nan(current_joint_dens)|is.na(current_joint_dens)|current_joint_dens <= 0){
+    u <- runif(1,0, 0.00001)}else{
+    u <- runif(1,0,current_joint_dens)}
+  
+  theta_b = current_theta
+  theta_f = current_theta
+  r_b = current_r
+  r_f = current_r
+  theta = current_theta
+  epilson_bar = current_epsilon_bar
+  H_bar = current_H_bar
+  epsilon = current_epsilon
+  
+  j = 0
+  n = 1
+  s = 1
+  
+  while (s == 1){
+    v_j = sample(c(-1,1),1)
+    
+    if (v_j == -1){
+      listb <- BuildTree3(theta_b, r_b, u, v = v_j, j, epsilon, sigma_max = 1000, 
+                          LL_log, grad_LL_log, current_theta, current_r)
+      theta_b<- listb$theta_b
+      r_b <- listb$r_b
+    }else{
+      listb <- BuildTree3(theta_f, r_f, u, v = v_j, j, epsilon, sigma_max = 1000, 
+                          LL_log, grad_LL_log, current_theta, current_r)
+      theta_f<- listb$theta_f
+      r_f <- listb$r_f
+    }
+    
+    theta_p <- listb$theta_p
+    n_p <- listb$n_p
+    s_p <- listb$s_p
+    a_p <- listb$a_p
+    n_a_p <- listb$n_a_p
+    
+   #if (is.na(s_p) | is.nan(s_p)){s_p = 0}
+    g = min(1, n_p/n)
+    
+    if (s_p == 1 && runif(1) < g){theta <- theta_p}
+
+    n = n + n_p
+    
+    ip1<- sum((theta_f - theta_b)* r_b)
+    sc1 = ifelse(ip1 >= 0, 1, 0)
+    ip2<- sum((theta_f - theta_b)* r_f)
+    sc2 = ifelse(ip2 >= 0, 1, 0)
+    s = s_p * sc1 * sc2
+   
+    if (is.nan(s) | is.na(s)){s <- 0}
+    
+    j = j + 1
+    
+  }
+  
+  if (m <= M_adapt){
+    H_bar = (1 - 1/(m+t_0))*current_H_bar + 1/(m+t_0)*(delta - a_p/n_a_p)
+    epsilon = exp(mu -sqrt(m)/ gamma * H_bar)
+    epsilon_bar = exp(m^(-K)*log(epsilon)+ (1-m^(-K))*log(current_epsilon_bar))
+    }else{
+      H_bar = (1 - 1/(m+t_0))*current_H_bar + 1/(m+t_0)*(delta - a_p/n_a_p)
+      epsilon = epsilon_bar_list[M_adapt,]
+      epsilon_bar = exp(m^(-K)*log(epsilon)+ (1-m^(-K))*log(current_epsilon_bar))
+    }  
+  
+  return(list(theta = theta, epsilon = epsilon, epsilon_bar = epsilon_bar,
+              H_bar = H_bar))
+  
+}
+
+NUTDualAvg <- function(theta_0, delta, LL_log, grad_LL_log, M, M_adapt){
+  #theta
+  theta_list <- matrix(c(0), nrow = M, ncol = length(theta_0))
+  theta_list[1,] <- theta_0
+  #epsilon
+  epsilon0 <- FindReasonableEpsilon(theta_0, LL_log, grad_LL_log)
+  epsilon_list <- matrix(c(0), nrow = M, ncol = length(epsilon0))
+  epsilon_list[1,] <- epsilon0
+  #epsilon_bar 
+  epsilon_bar_0 <- 1
+  epsilon_bar_list <- matrix(c(0), nrow = M, ncol = length(epsilon_bar_0))
+  epsilon_bar_list[1,] <- epsilon_bar_0
+  #H_bar
+  H_bar_0 <- 0
+  H_bar_list <- matrix(c(0), nrow = M, ncol = length(H_bar_0))
+  H_bar_list[1,] <- H_bar_0
+  
+  mu = log(10*epsilon0)
+  gamma = 0.05 #default 0.05
+  t_0 = 10 # >0
+  K = 0.75 #(0.5,1]
+  
+  for (m in c(2:M)){
+    #m=2
+    current_theta <- theta_list[m-1,]
+    current_epsilon <- epsilon_list[m-1,]
+    current_epsilon_bar <- epsilon_bar_list[m-1,]
+    current_H_bar <- H_bar_list[m-1,]
+    
+    output <- NUTDualAvgOne(m, current_theta, current_epsilon, current_epsilon_bar, current_H_bar, 
+                            delta, LL_log, M_adapt, grad_LL_log, 
+                            mu, gamma, t_0, K, epsilon_bar_list)
+    theta_list[m,] <- output$theta
+    epsilon_list[m,] <- output$epsilon
+    epsilon_bar_list[m,] <- output$epsilon_bar
+    H_bar_list[m,] <- output$H_bar
+  }
+  
+  theta_list[]
+}
+```
+
+$\delta$: 0.25- 0.95
+
+```{r}
+source("algorithms_hoffman_NUTS.R")
+
+start_time <- Sys.time()
+
+set.seed(1234)
+
+theta_0 <- rep(1, times=no.parameters) 
+
+theta_list_NUTDualAvg <-NUTDualAvg(theta_0, delta = 0.8, LL_log = target,
+                                grad_LL_log= target_gradient, 
+                                M = 1000, M_adapt = 50)
+
+end_time <- Sys.time()
+end_time - start_time
+
+```
+
+### NUTS with Dual Averaging Quantile
+
+```{r}
+beta.qnt.NUTDualAvg <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.NUTDualAvg<- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.NUTDualAvg)) {
+  beta.qnt.NUTDualAvg[i,] <- quantile(theta_list_NUTDualAvg[1:950,i],myqnt)
+}
+
+beta.qnt.NUTDualAvg
+
+sigmasq.qnt.NUTDualAvg <- quantile(exp(theta_list_NUTDualAvg[1:950, no.parameters]),myqnt)
+sigmasq.qnt.NUTDualAvg
+```
+
+```{r}
+theta_NUTDualAvg <- data.frame(theta_list_NUTDualAvg[-c(1:100),])
+colnames(theta_NUTDualAvg)<- c(paste0("beta", c(1:4)), "sigma2")
+
+theta_NUTDualAvg$sigma2 <- exp(theta_NUTDualAvg$sigma2)
+
+theta_NUTDualAvg_l<- theta_NUTDualAvg%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_NUTDA <- theta_NUTDualAvg_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+theta_NUTDualAvg_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_NUTDA, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+# Simple linear model II
+
+```{r}
+NITER <- 120000
+start <- 80001
+BatchLength <- 1
+
+Y <- read.table("Y5485.txt", header=F)
+Y <- Y[,1]
+
+X <- as.matrix(read.table("X5485.txt", header=F))
+
+##Only to compare with standard linear model:
+
+simple.lm <- lm(Y ~ X[,2]+X[,3]+X[,4]+X[,5]+X[,6]+X[,7])
+simple.lm.summary <- summary(simple.lm)
+simple.lm.summary
+no.parameters = ncol(X)+1
+```
+
+
+```{r}
+coef2 <- data.frame(simple.lm.summary$coefficients[,1])
+rownames(coef2)<- paste0("beta", c(1:7))
+colnames(coef2) <- c("est")
+
+sigma2 <- data.frame(simple.lm.summary$sigma^2)
+colnames(sigma2 ) <- c("est")
+rownames(sigma2) <- c("sigma2")
+
+coef2 <- data.frame(rbind(coef2,sigma2))
+coef2$pred <- rownames(coef2)
+```
+
+```{r}
+## LL_log
+target <- function (theta, a=2,b=0.1){
+  beta <- theta[1:ncol(X)]
+  sigmasq <- exp(theta[length(theta)])
+  
+  out <- -(a+1+length(Y)/2.0) * log(sigmasq) + log(sigmasq) - (1/sigmasq)*(b + 0.5*t(Y-X%*%beta)%*%(Y-X%*%beta))
+  
+  return(out)
+}
+
+## grad_LL_log
+target_gradient<- function(theta, a=2, b=0.1){
+  beta <- as.matrix(theta[1:ncol(X)])
+  alpha <- theta[length(theta)]
+  
+  beta_grad <- exp(-alpha)*(t(X)%*%Y- t(X)%*%X %*% beta)
+  log_sigmasq_grad <- -(a+length(Y)/2.0) + exp(-alpha)*(b + 0.5*t(Y-X%*%beta)%*%(Y-X%*%beta))
+  
+  out_grad = t(rbind(beta_grad,log_sigmasq_grad))
+  
+  return(out_grad)
+}
+```
+
+## MH
+
+```{r}
+myscale = vcov(simple.lm)
+myscale = diag(c(diag(myscale),4.75e-6))
+myscale <- chol(myscale)
+
+set.seed(1234)
+inits <- rep(0, times=no.parameters) 
+metrop.out <- metrop(target, initial=inits, nbatch=NITER, blen=BatchLength, scale=myscale, a=2.0, b=100)
+
+# quantile
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.MH.lmod2 <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.MH.lmod2 <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.MH.lmod2)) {
+  beta.qnt.MH.lmod2[i,] <- quantile(metrop.out$batch[start:nrow(metrop.out$batch),i],myqnt)
+}
+beta.qnt.MH.lmod2
+
+sigmasq.qnt.MH.lmod2 <- quantile(exp(metrop.out$batch[start:nrow(metrop.out$batch),no.parameters]),myqnt)
+sigmasq.qnt.MH.lmod2
+
+```
+
+```{r}
+MH_out2 <- metrop.out$batch[start:nrow(metrop.out$batch),]
+colnames(MH_out2)<- c(paste0("beta", c(1:7)), "sigma2")
+MH_out2 <- data.frame(MH_out2)
+MH_out2$sigma2 <- exp(MH_out2$sigma2)
+MH_out_l2<- MH_out2%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_MH2 <- MH_out_l2%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+MH_out_l2 %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 30)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_MH2, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+
+## HMC
+
+```{r}
+theta_0 <- rep(0, times=no.parameters) 
+init_epsilon <- FindReasonableEpsilon(theta_0, LL_log = target,
+                          grad_LL_log= target_gradient)
+init_epsilon
+```
+
+```{r}
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+theta_list_HMC.lmod2<-HMC(theta_0, epsilon = init_epsilon, L = 60, 
+                          LL_log = target,
+                          grad_LL_log= target_gradient, M = 1000)
+
+```
+
+### HMC quantile
+
+```{r}
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.HMC.lmod2 <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.HMC.lmod2 <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMC.lmod2)) {
+  beta.qnt.HMC.lmod2[i,] <- quantile(theta_list_HMC.lmod2[,i],myqnt)
+}
+beta.qnt.HMC.lmod2
+
+sigmasq.qnt.HMC.lmod2 <- quantile(exp(theta_list_HMC.lmod2[, no.parameters]),myqnt)
+sigmasq.qnt.HMC.lmod2 
+```
+
+```{r}
+HMC_out2 <- theta_list_HMC.lmod2[-c(1:100),]
+colnames(HMC_out2)<- c(paste0("beta", c(1:7)), "sigma2")
+HMC_out2 <- data.frame(HMC_out2)
+HMC_out2$sigma2 <- exp(HMC_out2$sigma2)
+
+HMC_out2_l<- HMC_out2%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_HMC2 <- HMC_out2_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+HMC_out2_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_HMC2, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## Naive NUTS
+
+```{r}
+source("algorithms_hoffman_NUTS.R")
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_NaiveNUT.lmod2 <- NaiveNUT(theta_0, epsilon = init_epsilon,
+                                      LL_log = target,
+                                      grad_LL_log= target_gradient,
+                                      M = 2000, sigma_max = 1000)
+
+```
+
+### Naive NUTS Quantile
+
+```{r}
+beta.qnt.NaiveNUT.lmod2 <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.NaiveNUT.lmod2 <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.NaiveNUT.lmod2)) {
+  beta.qnt.NaiveNUT.lmod2[i,] <- quantile(theta_list_NaiveNUT.lmod2[,i],myqnt)
+}
+
+beta.qnt.NaiveNUT.lmod2
+
+sigmasq.qnt.NaiveNUT.lmod2 <- quantile(exp(theta_list_NaiveNUT.lmod2[, no.parameters]),myqnt)
+sigmasq.qnt.NaiveNUT.lmod2
+```
+
+```{r}
+NaiveNUT_out2 <- theta_list_NaiveNUT.lmod2[-c(1:1000),]
+colnames(NaiveNUT_out2)<- c(paste0("beta", c(1:7)), "sigma2")
+NaiveNUT_out2 <- data.frame(NaiveNUT_out2)
+NaiveNUT_out2$sigma2 <- exp(NaiveNUT_out2$sigma2)
+
+NaiveNUT_out2_l<- NaiveNUT_out2%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_NaiveNUT2 <- NaiveNUT_out2_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+NaiveNUT_out2_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_NaiveNUT2, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## Eff NUTS
+
+```{r}
+source("algorithms_hoffman_NUTS.R")
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_EffNUT.lmod2 <- EffNUT(theta_0, epsilon = init_epsilon, 
+                                  LL_log = target,
+                                  grad_LL_log = target_gradient,
+                                  M = NITER, sigma_max = 1000)
+
+```
+
+### Eff NUTS Quantile
+
+```{r}
+beta.qnt.EffNUT.lmod2 <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.EffNUT.lmod2 <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.EffNUT.lmod2)) {
+  beta.qnt.EffNUT.lmod2[i,] <- quantile(theta_list_EffNUT.lmod2[start:NITER,i],myqnt)
+}
+
+beta.qnt.EffNUT.lmod2
+
+sigmasq.qnt.EffNUT.lmod2 <- quantile(exp(theta_list_EffNUT.lmod2[start:NITER, no.parameters]),myqnt)
+sigmasq.qnt.EffNUT.lmod2
+```
+
+```{r}
+EffNUT_out2 <- theta_list_EffNUT.lmod2[start:NITER,]
+colnames(EffNUT_out2)<- c(paste0("beta", c(1:7)), "sigma2")
+EffNUT_out2 <- data.frame(EffNUT_out2)
+EffNUT_out2$sigma2 <- exp(EffNUT_out2$sigma2)
+
+EffNUT_out2_l<- EffNUT_out2%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_EffNUT2 <- EffNUT_out2_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+EffNUT_out2_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_EffNUT2, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+## HMC with Dual Averaging
+
+```{r}
+source("algorithms_hoffman_NUTS.R")
+
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_HMCDualAvg.lmod2 <-HMCDualAvg(theta_0, delta = 0.8, lambda = 60, 
+                                   LL_log = target,
+                                   grad_LL_log= target_gradient, 
+                                   M = 1000, M_adapt = 50)
+```
+
+### HMC with Dual Averaging
+
+```{r}
+beta.qnt.HMCDualAvg.lmod2 <- matrix(nrow=ncol(X),ncol=length(myqnt))
+sigmasq.qnt.HMCDualAvg.lmod2 <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMCDualAvg.lmod2)) {
+  beta.qnt.HMCDualAvg.lmod2[i,] <- quantile(theta_list_HMCDualAvg.lmod2[,i],myqnt)
+}
+
+beta.qnt.HMCDualAvg.lmod2
+
+sigmasq.qnt.HMCDualAvg.lmod2 <- quantile(exp(theta_list_HMCDualAvg.lmod2[, no.parameters]),myqnt)
+sigmasq.qnt.HMCDualAvg.lmod2
+```
+
+
+```{r}
+HMCDualAvg_out2 <- theta_list_HMCDualAvg.lmod2[-c(1:200),]
+colnames(HMCDualAvg_out2)<- c(paste0("beta", c(1:7)), "sigma2")
+HMCDualAvg_out2 <- data.frame(HMCDualAvg_out2)
+HMCDualAvg_out2$sigma2 <- exp(HMCDualAvg_out2$sigma2)
+
+HMCDualAvg_out2_l<- HMCDualAvg_out2%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_HMCDualAvg2 <- HMCDualAvg_out2_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+HMCDualAvg_out2_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 50)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_HMCDualAvg2, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+
+# QR Decomposition of design matrix
+
+## SLR 1
+
+```{r}
+# import data
+Y <- read.table("Y.txt", header=F)
+Y <- Y[,1]
+X <- as.matrix(read.table("X.txt", header=F))
+```
+
+
+```{r}
+xqr <- qr(X)
+Q <- qr.Q(xqr)
+R <- qr.R(xqr)
+
+n <- nrow(X)
+X2 <- Q * sqrt(n-1) # scale
+colnames(X2) <- colnames(X)
+
+Rstar <- R / sqrt(n-1)
+Rstar_inv <- solve(Rstar)
+
+calc_beta <- function(beta_tilde_param, Rstarinv) {
+  as.numeric(Rstarinv %*% beta_tilde_param)
+}
+```
+
+```{r}
+## LL_log
+targetQR <- function (theta, a=2,b=0.1){
+  beta <- theta[1:ncol(X2)]
+  sigmasq <- exp(theta[length(theta)])
+  
+  out <- -(a+1+length(Y)/2.0) * log(sigmasq) + log(sigmasq) - (1/sigmasq)*(b + 0.5*t(Y-X2%*%beta)%*%(Y-X2%*%beta))
+  
+  return(out)
+}
+
+## grad_LL_log
+target_gradientQR<- function(theta, a=2, b=0.1){
+  beta <- as.matrix(theta[1:ncol(X2)])
+  alpha <- theta[length(theta)]
+  
+  beta_grad <- exp(-alpha)*(t(X2)%*%Y- t(X2)%*%X2 %*% beta)
+  log_sigmasq_grad <- -(a+length(Y)/2.0) + exp(-alpha)*(b + 0.5*t(Y-X2%*%beta)%*%(Y-X2%*%beta))
+  
+  out_grad = t(rbind(beta_grad,log_sigmasq_grad))
+  
+  return(out_grad)
+}
+```
+
+
+```{r}
+simple.lm <- lm(Y ~ X[,2]+X[,3]+X[,4])
+simple.lm.summary <- summary(simple.lm)
+simple.lm.summary
+
+no.parameters = ncol(X)+1
+```
+
+### HMC
+
+```{r}
+theta_0 <- rep(0, times=no.parameters) 
+FindReasonableEpsilon(theta_0, LL_log = targetQR,
+                          grad_LL_log= target_gradientQR)
+```
+
+```{r}
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_lmod1_QR<-HMC(theta_0, epsilon = 0.03125, L = 60, 
+                          LL_log = targetQR,
+                          grad_LL_log= target_gradientQR, M = 1000)
+
+beta_lmod1_QR <- t(apply(theta_list_lmod1_QR[,1:4], 1, 
+                       calc_beta, Rstarinv=Rstar_inv))
+
+```
+
+#### HMC quantile
+
+```{r}
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.HMC.lmod1QR <- matrix(nrow=ncol(X2),ncol=length(myqnt))
+sigmasq.qnt.HMC.lmod1QR <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMC.lmod1QR)) {
+  beta.qnt.HMC.lmod1QR[i,] <- quantile(beta_lmod1_QR[,i],myqnt)
+}
+beta.qnt.HMC.lmod1QR
+
+sigmasq.qnt.HMC.lmod1QR <- quantile(exp(theta_list_lmod1_QR[, no.parameters]),myqnt)
+sigmasq.qnt.HMC.lmod1QR 
+```
+
+```{r}
+HMC_out3 <- t(apply(theta_list_lmod1_QR[-c(1:50),1:4],
+                   1, calc_beta,Rstarinv=Rstar_inv))
+colnames(HMC_out3)<- c(paste0("beta", c(1:4)))
+HMC_out3 <- data.frame(HMC_out3)
+HMC_out3$sigma2 <- exp(theta_list_lmod1_QR[-c(1:50),5])
+
+HMC_out3_l<- HMC_out3%>%
+    pivot_longer(cols = c(1:5),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_HMC3 <- HMC_out3_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+HMC_out3_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 20)+
+  geom_vline(data = coef1, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_HMC3, mapping = aes(xintercept = mean_x)) +
+  geom_vline(data = sum_theta_list_HMC, mapping = aes(xintercept = mean_x), col="blue") +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```
+
+
+## SLR 2
+
+```{r}
+NITER <- 120000
+start <- 80001
+BatchLength <- 1
+
+Y <- read.table("Y5485.txt", header=F)
+Y <- Y[,1]
+
+X <- as.matrix(read.table("X5485.txt", header=F))
+no.parameters = ncol(X)+1
+```
+
+```{r}
+X_p <- X[,-1]
+colnames(X_p) <- c(paste0("Pred", c(2:7)))
+ggpairs(data.frame(X_p))
+```
+
+- normal equations:
+
+$$
+X^TX\beta=X^TY\\
+\hat\beta = (X^TX)^{-1}X^TY
+$$
+
+- QR decompsotion
+
+$$
+X = QR\\
+(QR)^T(QR)\beta = (QR)^TY\\
+\tilde{\beta} = R\hat\beta = Q^TY
+$$
+
+```{r}
+QR <- qr(X)
+Q <- qr.Q(QR)
+R <- qr.R(QR)
+
+n <- nrow(X)
+X_QR <- Q * sqrt(n-1) # scale
+colnames(X_QR) <- colnames(X)
+
+Rs <- R / sqrt(n-1)
+Rs_inv <- solve(Rs)
+
+calc_beta <- function(beta_tilde, Rs_inv) {
+  as.numeric(Rs_inv %*% beta_tilde)
+}
+```
+
+
+```{r}
+## LL_log
+targetQR <- function (theta, a=2,b=0.1){
+  beta <- theta[1:ncol(X_QR)]
+  sigmasq <- exp(theta[length(theta)])
+  
+  out <- -(a+1+length(Y)/2.0) * log(sigmasq) + log(sigmasq) - (1/sigmasq)*(b + 0.5*t(Y-X_QR%*%beta)%*%(Y-X_QR%*%beta))
+  
+  return(out)
+}
+
+## grad_LL_log
+target_gradientQR<- function(theta, a=2, b=0.1){
+  beta <- as.matrix(theta[1:ncol(X_QR)])
+  alpha <- theta[length(theta)]
+  
+  beta_grad <- exp(-alpha)*(t(X_QR)%*%Y- t(X_QR)%*%X_QR %*% beta)
+  log_sigmasq_grad <- -(a+length(Y)/2.0) + exp(-alpha)*(b + 0.5*t(Y-X_QR%*%beta)%*%(Y-X_QR%*%beta))
+  
+  out_grad = t(rbind(beta_grad,log_sigmasq_grad))
+  
+  return(out_grad)
+}
+```
+
+
+## HMC Dual Averaging
+
+```{r}
+set.seed(1234)
+
+theta_0 <- rep(0, times=no.parameters) 
+
+theta_list_HMCDualAvg_lmod2QR<-HMCDualAvg(theta_0, delta = 0.8, lambda = 60, 
+                                   LL_log = targetQR,
+                                   grad_LL_log= target_gradientQR, 
+                                   M = 1000, M_adapt = 50)
+
+beta_HMCDA_QR <- t(apply(theta_list_HMCDualAvg_lmod2QR[,1:7], 1, 
+                       calc_beta, Rs_inv=Rs_inv))
+```
+
+#### quantile
+
+```{r}
+myqnt <- c(0.50, 0.025, 0.975)
+beta.qnt.HMCDA.lmod2QR <- matrix(nrow=ncol(X_QR),ncol=length(myqnt))
+sigmasq.qnt.HMCDA.lmod2QR <- rep(0,times=length(myqnt))
+
+for (i in 1:nrow(beta.qnt.HMCDA.lmod2QR)) {
+  beta.qnt.HMCDA.lmod2QR[i,] <- quantile(beta_HMCDA_QR[,i],myqnt)
+}
+beta.qnt.HMCDA.lmod2QR
+
+sigmasq.qnt.HMCDA.lmod2QR <- quantile(exp(theta_list_HMCDualAvg_lmod2QR[, no.parameters]),myqnt)
+sigmasq.qnt.HMCDA.lmod2QR 
+```
+
+```{r}
+HMC_out5 <- t(apply(theta_list_HMCDualAvg_lmod2QR[-c(1:50),1:7],
+                   1, calc_beta,Rs_inv=Rs_inv))
+colnames(HMC_out5)<- c(paste0("beta", c(1:7)))
+HMC_out5 <- data.frame(HMC_out5)
+HMC_out5$sigma2 <- exp(theta_list_HMCDualAvg_lmod2QR[-c(1:50),8])
+
+HMC_out5_l<- HMC_out5%>%
+    pivot_longer(cols = c(1:8),
+                 names_to = "pred",
+                 values_to = "value")
+
+sum_HMC5 <- HMC_out5_l%>%
+  group_by(pred)%>%
+  summarise(mean_x = mean(value))
+
+HMC_out5_l %>%
+  ggplot(aes(x=value, fill=pred))+
+  geom_histogram(bins = 20)+
+  geom_vline(data = coef2, mapping = aes(xintercept = est), col="red") +
+  geom_vline(data = sum_HMC5, mapping = aes(xintercept = mean_x)) +
+  facet_wrap(~pred,scales = "free")+
+  theme(legend.position="none")+
+  labs(x="theta")+
+  scale_fill_brewer(palette="Pastel2")
+```

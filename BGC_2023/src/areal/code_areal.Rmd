@@ -1,0 +1,50 @@
+---
+title: "Plotting a map with county identifiers"
+output: html_document
+date: "2023-10-02"
+---
+
+1. Required Libraries
+```{r}
+library(maps)
+library(sf)
+library(sp)
+```
+
+2. Get county map for California from R "maps" library and create an "sf" object.
+```{r}
+ca.county = map("county","california", fill=TRUE, plot=FALSE)
+ca.county.sf <- st_as_sf(ca.county)
+```
+
+3. Turn off the spherical geometry option as the "maps" library uses planar projections.
+```{r} 
+sf_use_s2(FALSE)
+```
+
+4. Plot the county map of California
+```{r}
+ca.coords = st_coordinates(st_centroid(ca.county.sf))
+plot(st_geometry(ca.county.sf), main="County map of California")
+```
+
+5. Add the county names.
+```{r}
+plot(st_geometry(ca.county.sf), main="County map of California")
+county.ID <- sapply(strsplit(ca.county$names, ","), function(x) x[2])
+text(ca.coords, county.ID, cex=0.5, col = "red")
+```
+
+6. Find the neighbors of Alameda county using tools in "spdep" library. We first create an "nb" object from the sf object. Next, we extract region id for the counties from the "nb" object. We use a bit of string splitting to extract thee name of the county only, create an adjacency matrix and finally extract the names of the neighbors from the adjacency matrix. 
+```{r}
+library(spdep)
+ca.nb = poly2nb(ca.county.sf)
+ca.region.id = attr(ca.nb, "region.id")
+ca.region.id = sapply(strsplit(ca.region.id, ","), function(x) x[2])
+alameda.neighbors.index = ca.nb[[match("alameda", ca.region.id)]]
+ca.adj.mat = nb2mat(ca.nb, style="B")
+alameda.neighbors = rownames(ca.adj.mat[alameda.neighbors.index,])
+alameda.neighbors = sapply(strsplit(alameda.neighbors, ","), function(x) x[2])
+alameda.neighbors
+```
+
