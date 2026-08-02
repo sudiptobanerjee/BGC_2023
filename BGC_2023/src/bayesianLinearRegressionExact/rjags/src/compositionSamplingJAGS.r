@@ -13,7 +13,7 @@ run_replicated_jags_composition <- function(X, Y,
   P <- ncol(X)
   
   # -------------------------------------------------------------------
-  # Setup Prior Precision Factor M0_inv and Mean Vectors (m0, mu0)[cite: 15]
+  # Setup Prior Precision Factor M0_inv and Mean Vectors (m0, mu0)
   # -------------------------------------------------------------------
   if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
   
@@ -24,22 +24,19 @@ run_replicated_jags_composition <- function(X, Y,
     m0 <- as.vector(M0_inv %*% mu0)
   } else if (!is.null(m0) && is.null(mu0)) {
     R0_prec <- chol(M0_inv)
-    # Optimized triangular solve using transpose = TRUE
-    z0      <- backsolve(R0_prec, m0, transpose = TRUE)
+    z0      <- forwardsolve(t(R0_prec), m0)
     mu0     <- as.vector(backsolve(R0_prec, z0))
   }
   
   # -------------------------------------------------------------------
-  # 1. Compute Analytical Posterior Parameters in R[cite: 15]
+  # 1. Compute Analytical Posterior Parameters in R
   # -------------------------------------------------------------------
-  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1[cite: 15]
-  RN    <- chol(M_inv)                             # Cholesky factor of M^-1[cite: 15]
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
   
-  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m[cite: 15]
-  
-  # Optimized triangular solve using transpose = TRUE
-  zN    <- backsolve(RN, m_vec, transpose = TRUE)
-  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m[cite: 15]
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
   
   YtY             <- as.numeric(crossprod(Y))
   prior_quad_term <- as.numeric(crossprod(m0, mu0))
@@ -49,13 +46,13 @@ run_replicated_jags_composition <- function(X, Y,
   b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
   
   # -------------------------------------------------------------------
-  # 2. Draw tau directly in R (Exact Marginal Sample)[cite: 15]
+  # 2. Draw tau directly in R (Exact Marginal Sample)
   # -------------------------------------------------------------------
   tau_samples    <- rgamma(M_samples, shape = a_N, rate = b_N)
   sigma2_samples <- 1 / tau_samples
   
   # -------------------------------------------------------------------
-  # 3. Precompute 3D precision array (Bypasses JAGS DAG build overhead)[cite: 15]
+  # 3. Precompute 3D precision array (Bypasses JAGS DAG build overhead)
   # -------------------------------------------------------------------
   beta_prec_array <- array(NA, dim = c(M_samples, P, P))
   for (m in 1:M_samples) {
@@ -63,12 +60,12 @@ run_replicated_jags_composition <- function(X, Y,
   }
   
   # -------------------------------------------------------------------
-  # 4. Replicate Data Matrix Y_rep (M_samples x N)[cite: 15]
+  # 4. Replicate Data Matrix Y_rep (M_samples x N)
   # -------------------------------------------------------------------
   Y_rep <- matrix(Y, nrow = M_samples, ncol = N, byrow = TRUE)
   
   # -------------------------------------------------------------------
-  # 5. Inline JAGS Model Definition[cite: 15]
+  # 5. Inline JAGS Model Definition
   # -------------------------------------------------------------------
   model_string <- "
   model {
@@ -94,7 +91,7 @@ run_replicated_jags_composition <- function(X, Y,
   )
   
   # -------------------------------------------------------------------
-  # 6. Compile and Sample in 1 Iteration without Adaptation[cite: 15]
+  # 6. Compile and Sample in 1 Iteration without Adaptation
   # -------------------------------------------------------------------
   jags_model <- jags.model(
     textConnection(model_string), 

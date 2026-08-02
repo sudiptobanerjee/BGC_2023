@@ -1,0 +1,268 @@
+---
+title: " Predictive Inference in Bayesian Linear Regression"
+author: "Sudipto Banerjee"
+output: html_document
+---
+
+*Note:* To generate this HTML file, run `renderRaw.sh` in the terminal from the `src/bayesianLinearRegressionExact/raw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/raw/run
+./renderRaw.sh
+```
+
+---
+
+In Bayesian inference, prediction involves obtaining the distribution of unobserved outcomes $\tilde{y}$ ($m \times 1$) for a given matrix of predictor variables $\tilde{X}$ ($m \times p$), conditional on the observed data $y$.
+
+### Marginal Posterior Predictive Distribution
+
+To account for parameter uncertainty, predictions are formed by integrating the conditional predictive density over the joint posterior distribution of the model parameters $\theta = \{\beta, \sigma^2\}$:
+
+$$p(\tilde{y} \mid y) = \int p(\tilde{y} \mid \theta, y) p(\theta \mid y) \, \text{d}\theta$$
+
+Equivalently, draws can be obtained from the joint distribution $p(\theta, \tilde{y} \mid y)$ via composition sampling:
+
+---
+
+**Algorithm 1:** General Exact Posterior Predictive Sampling
+
+1. **For** $i$ in $1:N$:
+2. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\theta_{(i)} \sim p(\theta \mid y)$
+3. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\tilde{y}_{(i)} \sim p(\tilde{y} \mid \theta_{(i)}, y)$
+4. **EndFor**
+5. **Return** $(\tilde{y}_{(i)})_{i=1,2,\ldots, N}$
+
+---
+
+## Prediction under Independent Errors ($V_y = I_n$)
+
+For legitimate probabilistic forecasting, the conditional distribution $p(\tilde{y} \mid \theta, y)$ must be well-defined. Consider first the standard linear regression model where errors are independent and identically distributed ($V_y = I_n$).
+
+We joint-specify the observed and unobserved data as:
+
+$$\begin{bmatrix} y \\ \tilde{y} \end{bmatrix} = \begin{bmatrix} X \\ \tilde{X} \end{bmatrix}\beta + \begin{bmatrix} \epsilon \\ \tilde{\epsilon} \end{bmatrix} \quad ; \quad \begin{bmatrix} \epsilon \\ \tilde{\epsilon} \end{bmatrix} \sim N\left(\begin{bmatrix} 0 \\ 0 \end{bmatrix}, \, \sigma^2 \begin{bmatrix} I_n & 0 \\ 0 & I_m \end{bmatrix}\right)$$
+
+Because the error terms $\epsilon$ and $\tilde{\epsilon}$ are independent, the conditional predictive density depends only on the model parameters $\theta$:
+
+$$p(\tilde{y} \mid \theta, y) = p(\tilde{y} \mid \theta) = N(\tilde{y} \mid \tilde{X}\beta, \, \sigma^2 I_m)$$
+
+The posterior predictive density is therefore:
+
+$$p(\tilde{y} \mid y) = \int N(\tilde{y} \mid \tilde{X}\beta, \, \sigma^2 I_m) \, p(\beta, \sigma^2 \mid y) \, \text{d}\beta \, \text{d}\sigma^2$$
+
+---
+
+**Algorithm 2:** Exact Posterior Predictive Sampling ($V_y = I_n$)
+
+1. **For** $i$ in $1:N$:
+2. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\sigma^2_{(i)} \sim IG(a^*, b^*)$
+3. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\beta_{(i)} \sim N\left(Mm, \, \sigma^2_{(i)} M\right)$
+4. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\tilde{y}_{(i)} \sim N\left(\tilde{X}\beta_{(i)}, \, \sigma^2_{(i)} I_m\right)$
+5. **EndFor**
+6. **Return** $(\tilde{y}_{(i)})_{i=1,2,\ldots, N}$
+
+---
+
+## Prediction under General Covariance ($V_y$)
+
+When observations exhibit correlation or heteroskedasticity, we specify a general joint covariance matrix across observed data $y$ and unobserved targets $\tilde{y}$:
+
+$$\begin{bmatrix} y \\ \tilde{y} \end{bmatrix} = \begin{bmatrix} X \\ \tilde{X} \end{bmatrix}\beta + \begin{bmatrix} \epsilon \\ \tilde{\epsilon} \end{bmatrix} \quad ; \quad \begin{bmatrix} \epsilon \\ \tilde{\epsilon} \end{bmatrix} \sim N\left(\begin{bmatrix} 0 \\ 0 \end{bmatrix}, \, \sigma^2 \begin{bmatrix} V_y & V_{y\tilde{y}} \\ V_{y\tilde{y}}^{\top} & V_{\tilde{y}} \end{bmatrix}\right)$$
+
+Applying standard multivariate normal conditioning rules, the conditional density $p(\tilde{y} \mid \theta, y) = N(\tilde{y} \mid \mu_{\tilde{y}\mid y}, \, \sigma^2 V_{\tilde{y}\mid y})$ is parameterised by:
+
+$$\mu_{\tilde{y}\mid y} = \tilde{X}\beta + V_{y\tilde{y}}^{\top}V_y^{-1}(y - X\beta)$$
+
+$$V_{\tilde{y}\mid y} = V_{\tilde{y}} - V_{y\tilde{y}}^{\top}V_y^{-1}V_{y\tilde{y}}$$
+
+The corresponding posterior predictive density integrates over this conditional density:
+
+$$p(\tilde{y} \mid y) = \int N\left(\tilde{y} \mid \mu_{\tilde{y}\mid y}, \, \sigma^2 V_{\tilde{y}\mid y}\right) p(\beta, \sigma^2 \mid y) \, \text{d}\beta \, \text{d}\sigma^2$$
+
+---
+
+**Algorithm 3:** Exact Posterior Predictive Sampling (General $V_y$)
+
+1. **For** $i$ in $1:N$:
+2. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\sigma^2_{(i)} \sim IG(a^*, b^*)$
+3. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\beta_{(i)} \sim N\left(Mm, \, \sigma^2_{(i)} M\right)$
+4. &nbsp;&nbsp;&nbsp;&nbsp;Compute $\mu_{\tilde{y}\mid y} = \tilde{X}\beta_{(i)} + V_{y\tilde{y}}^{\top}V_y^{-1}(y - X\beta_{(i)})$
+5. &nbsp;&nbsp;&nbsp;&nbsp;Draw $\tilde{y}_{(i)} \sim N\left(\mu_{\tilde{y}\mid y}, \, \sigma^2_{(i)} V_{\tilde{y}\mid y}\right)$
+6. **EndFor**
+7. **Return** $(\tilde{y}_{(i)})_{i=1,2,\ldots, N}$
+
+---
+
+```{r predictive_workflow, message=FALSE, warning=FALSE, fig.width=12, fig.height=6}
+# -----------------------------------------------------------------------------
+# 1. Source Optimized Samplers
+# -----------------------------------------------------------------------------
+source("../src/rawSampler.r")
+source("../src/rawPosteriorPredictive.r")
+
+# -----------------------------------------------------------------------------
+# 2. Load Data and Partition into Training (80%) and Hold-out/Test (20%)
+# -----------------------------------------------------------------------------
+dataset <- read.table("../../data/data.txt", header = TRUE)
+
+set.seed(42)
+n_total   <- nrow(dataset)
+train_idx <- sample.int(n_total, size = floor(0.8 * n_total))
+
+train_data <- dataset[train_idx, ]
+test_data  <- dataset[-train_idx, ]
+
+# -----------------------------------------------------------------------------
+# 3. Train Covariate Matrix & Scaling Attributes
+# -----------------------------------------------------------------------------
+y_train     <- train_data[, 1]
+X_train_raw <- as.matrix(train_data[, -1])
+
+# Center and scale training predictors, saving transformation parameters
+X_train_scaled <- scale(X_train_raw)
+train_center   <- attr(X_train_scaled, "scaled:center")
+train_scale    <- attr(X_train_scaled, "scaled:scale")
+
+X_train   <- cbind(Intercept = 1, X_train_scaled)
+p         <- ncol(X_train)
+N_samples <- 5000
+
+# -----------------------------------------------------------------------------
+# 4. Fit Model Posterior via rawSampler
+# -----------------------------------------------------------------------------
+posterior <- rawSampler(
+  y = y_train, 
+  X = X_train, 
+  m0 = matrix(0, p, 1), 
+  M0_inv = matrix(0, p, p), 
+  a0 = -p/2, 
+  b0 = 0, 
+  N = N_samples
+)
+
+beta_draws   <- posterior$draws[, 1:p]
+sigma2_draws <- posterior$draws[, "sigma2"]
+
+# -----------------------------------------------------------------------------
+# 5. Prepare Hold-out Test Matrix (Re-using Training Scale Parameters)
+# -----------------------------------------------------------------------------
+X_test_raw    <- as.matrix(test_data[, -1])
+X_test_scaled <- scale(X_test_raw, center = train_center, scale = train_scale)
+X_test        <- cbind(Intercept = 1, X_test_scaled)
+y_test_actual <- test_data[, 1]
+
+# -----------------------------------------------------------------------------
+# 6. Generate Posterior Predictive Draws (High Performance via tcrossprod)
+# -----------------------------------------------------------------------------
+Y_tilde_draws <- rawPosteriorPredictive(
+  X_new = X_test, 
+  beta_draws = beta_draws, 
+  sigma2_draws = sigma2_draws
+)
+
+# -----------------------------------------------------------------------------
+# 7. Summarise Predictive Draws & Calculate Performance Metrics
+# -----------------------------------------------------------------------------
+
+# Point predictions (Posterior Predictive Mean)
+y_pred_mean <- rowMeans(Y_tilde_draws)
+
+# 95% Posterior Predictive Intervals (2.5% and 97.5% quantiles)
+y_pred_pi   <- t(apply(Y_tilde_draws, 1, quantile, probs = c(0.025, 0.975)))
+
+# Coverage Check: Determine if actual hold-out Y falls within the 95% PI
+in_interval   <- (y_test_actual >= y_pred_pi[, 1]) & (y_test_actual <= y_pred_pi[, 2])
+coverage_rate <- mean(in_interval) * 100
+
+# Error metrics
+rmspe <- sqrt(mean((y_test_actual - y_pred_mean)^2))
+mae   <- mean(abs(y_test_actual - y_pred_mean))
+
+cat("====================================================\n")
+cat("       POSTERIOR PREDICTIVE PERFORMANCE             \n")
+cat("====================================================\n")
+cat(sprintf("Hold-out Sample Size (m)    : %d\n", length(y_test_actual)))
+cat(sprintf("RMSPE                      : %.4f\n", rmspe))
+cat(sprintf("MAE                        : %.4f\n", mae))
+cat(sprintf("Empirical 95%% Coverage Rate: %.2f%%\n", coverage_rate))
+cat("====================================================\n")
+
+# -----------------------------------------------------------------------------
+# 8. Diagnostic Plots: 95% Predictive Intervals vs Hold-out Data
+# -----------------------------------------------------------------------------
+
+par(mfrow = c(1, 2), mar = c(5, 4.5, 4, 2) + 0.1)
+
+# --- PLOT 1: Sorted Hold-out Observations vs 95% Predictive Intervals ---
+sort_idx        <- order(y_test_actual)
+y_test_sorted   <- y_test_actual[sort_idx]
+y_mean_sorted   <- y_pred_mean[sort_idx]
+pi_lower_sorted <- y_pred_pi[sort_idx, 1]
+pi_upper_sorted <- y_pred_pi[sort_idx, 2]
+in_cov_sorted   <- in_interval[sort_idx]
+
+m_test <- length(y_test_actual)
+
+plot(1:m_test, y_test_sorted, type = "n",
+     ylim = range(c(pi_lower_sorted, pi_upper_sorted, y_test_sorted)),
+     xlab = "Hold-out Observation Index (Sorted by True Y)",
+     ylab = "Target Variable Y",
+     main = "95% Posterior Predictive Intervals vs Hold-out Y",
+     cex.lab = 1.1, cex.main = 1.2)
+
+# Draw 95% predictive interval segments (Blue = Covered, Red = Uncovered)
+segments(1:m_test, pi_lower_sorted, 1:m_test, pi_upper_sorted, 
+         col = ifelse(in_cov_sorted, rgb(0.2, 0.5, 0.8, 0.6), rgb(0.9, 0.2, 0.2, 0.8)), 
+         lwd = 1.8)
+
+# Add posterior predictive mean
+points(1:m_test, y_mean_sorted, pch = 18, col = "navy", cex = 1.1)
+
+# Add true actual hold-out y values
+points(1:m_test, y_test_sorted, 
+       pch = 16, 
+       col = ifelse(in_cov_sorted, "black", "firebrick3"), 
+       cex = 1.1)
+
+legend("topleft", 
+       legend = c("Actual Y (Covered)", "Actual Y (Uncovered)", 
+                  "Predictive Mean", "95% Predictive Interval"),
+       col = c("black", "firebrick3", "navy", rgb(0.2, 0.5, 0.8, 0.8)),
+       pch = c(16, 16, 18, NA), 
+       lty = c(NA, NA, NA, 1), 
+       lwd = c(NA, NA, NA, 2), 
+       bty = "n", cex = 0.9)
+
+# --- PLOT 2: Observed vs. Predicted Scatter Plot ---
+plot(y_test_actual, y_pred_mean, 
+     xlim = range(c(y_test_actual, y_pred_pi)),
+     ylim = range(c(y_test_actual, y_pred_pi)),
+     xlab = "Observed Hold-out Y", 
+     ylab = "Predicted Y (Posterior Predictive Mean)",
+     main = "Observed vs. Predicted Y with 95% PIs",
+     pch = 16, 
+     col = ifelse(in_interval, rgb(0.1, 0.1, 0.1, 0.7), "firebrick3"), 
+     cex = 1.2, cex.lab = 1.1, cex.main = 1.2)
+
+# Draw vertical error bars representing the 95% predictive interval
+segments(y_test_actual, y_pred_pi[, 1], y_test_actual, y_pred_pi[, 2], 
+         col = ifelse(in_interval, rgb(0.2, 0.5, 0.8, 0.35), rgb(0.9, 0.2, 0.2, 0.5)), 
+         lwd = 1.2)
+
+# 45-degree reference line (Ideal perfect prediction)
+abline(0, 1, col = "red", lty = 2, lwd = 2)
+
+legend("topleft", 
+       legend = c("1:1 Reference Line", "Covered Observation", "Uncovered Observation"),
+       col = c("red", "black", "firebrick3"), 
+       lty = c(2, NA, NA), 
+       pch = c(NA, 16, 16), 
+       bty = "n", cex = 0.9)
+
+# Reset graphics layout
+par(mfrow = c(1, 1))
+```
+
+

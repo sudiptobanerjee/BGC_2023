@@ -1,0 +1,82 @@
+---
+title: "Plotting Data On Maps in R"
+output: html_document
+date: "2023-08-21"
+---
+
+1. Required Libraries
+```{r}
+library(spData)
+library(sf)
+library(maps)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+library(spdep)
+library(lwgeom)
+```
+
+2. Import variable from external database
+```{r}
+rate_5y <- read.csv("data/SIR_adjusted.csv")[,-1]
+rate_lung = rate_5y %>% filter(Site.code == "Lung and Bronchus")
+rate_esophagus = rate_5y %>% filter(Site.code == "Esophagus")
+rate_larynx = rate_5y %>% filter(Site.code == "Larynx")
+rate_colrect = rate_5y %>% filter(Site.code == "Colon and Rectum")
+```
+
+3. Create data frame for lung cancer 
+```{r}
+cancers.df = data.frame(rate_lung, rate_esophagus, rate_larynx, rate_colrect)
+```
+
+4. Prepare data for plotting on maps
+```{r}
+ca.county = map("county","california", fill=TRUE, plot=FALSE)
+county.ID <- sapply(strsplit(ca.county$names, ","), function(x) x[2])
+ca.county.sf <- st_as_sf(ca.county, ID=county.ID)
+ca.county.sf$rate_lung = rate_lung$standard_ratio
+ca.county.sf$rate_esophagus = rate_esophagus$standard_ratio
+ca.county.sf$rate_larynx = rate_larynx$standard_ratio
+ca.county.sf$rate_colrect = rate_colrect$standard_ratio
+```
+
+5. Produce map of cancer indicences
+```{r}
+brks_fit_lung = quantile(ca.county.sf$rate_lung, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_esophagus = quantile(ca.county.sf$rate_esophagus, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_larynx = quantile(ca.county.sf$rate_larynx, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+brks_fit_colrect = quantile(ca.county.sf$rate_colrect, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+color.palette = rev(brewer.pal(5,"RdBu"))
+class(color.palette)
+
+par(mfrow=c(2,2), oma = c(0,0,4,0) + 0.1, mar = c(0,0,1,0) + 0.1)
+
+plot(ca.county.sf["rate_lung"], pal = color.palette, breaks = brks_fit_lung, main = "Lung cancer")
+
+plot(ca.county.sf["rate_esophagus"], pal = color.palette, breaks = brks_fit_esophagus, main = "Esophageal cancer")
+
+plot(ca.county.sf["rate_larynx"], pal = color.palette, breaks = brks_fit_larynx, main = "larynx cancer")
+
+plot(ca.county.sf["rate_colrect"], pal = color.palette, breaks = brks_fit_colrect, main = "colorectal cancer")
+```
+
+```{r}
+names(ca.county.sf)
+```
+
+
+6. Extract Neighbour information
+```{r}
+ca.county.sf$geom <- lwgeom_make_valid(ca.county.sf$geom)
+ca.county.sp <- as(ca.county.sf, "Spatial")
+nb <- poly2nb(ca.county.sp, queen = TRUE)
+neighbor_names <- lapply(nb, function(indices) {
+  paste(ca.county.sf$ID[indices], collapse = ", ")
+})
+ca.county.sf$neighbors <- unlist(neighbor_names)
+head(ca.county.sf[, c("ID", "neighbors")])
+```

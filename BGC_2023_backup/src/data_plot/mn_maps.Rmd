@@ -1,0 +1,135 @@
+---
+title: "Plotting Data on a Maps: An example using a shapefile for Minnesota"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(maptools)
+library(maps)
+library(raster)
+library(mapdata)
+library(mvtnorm)
+library(spdep)
+library(maptools)
+library(RColorBrewer)
+library(maps)
+library(classInt)
+library(intervals)
+```
+
+1. Read the shapefile for the state of Minnesota.
+
+```{r}
+minnesota.shp <- readShapePoly("../../data/minnesota.shp",proj4string=CRS("+proj=longlat"))
+```
+
+2. Read the data
+```{r}
+newdata <- read.csv("../../data/newdata.csv")
+```
+
+3. Merge the data and file in the order of names contained in the shape file
+```{r}
+minnesota.shp <- merge(minnesota.shp, newdata, by="NAME")
+```
+
+4. Extract some variables of interest from the merged shapefile.
+```{r}
+CASES <- minnesota.shp$cases
+POP1999 <- minnesota.shp$POP1999
+income <- minnesota.shp$income
+var <- (CASES/POP1999)*100
+nclr <- 7
+plotclr <- brewer.pal(nclr,"Reds")
+class <- classIntervals(var, nclr, style="equal", dataPrecision=4)
+colcode <- findColours(class, plotclr)
+plot(minnesota.shp)
+plot(minnesota.shp, col=colcode, add=T)
+title(main="Influenza rate")
+legend("bottomright", legend=names(attr(colcode, "table")),
+    fill=attr(colcode, "palette"), cex=0.6, bty="n")
+```
+
+5. Another possible approach: extract name order from the shape file, rearrange rows of the data using this specified order. Then the files need not be merged. This solution was pointed out to the authors by Dr. Erica Porter (currently in Clemson University).
+```{r}
+shape.names <- minnesota.shp$NAME
+newdataOrdered <- newdata[order(factor(newdata$NAME,levels=shape.names)),]
+```
+6. Check that names match
+```{r}
+mean(minnesota.shp$NAME==newdataOrdered$NAME)
+# 
+var <- newdataOrdered$cases/minnesota.shp$POP1999*100
+nclr <- 7
+plotclr <- brewer.pal(nclr,"Reds")
+class <- classIntervals(var, nclr, style="equal", dataPrecision=4)
+colcode <- findColours(class, plotclr)
+plot(minnesota.shp)
+plot(minnesota.shp, col=colcode, add=T)
+title(main="Influenza rate when data is rearranged prior to mapping")
+legend("bottomright", legend=names(attr(colcode, "table")), fill=attr(colcode, "palette"), cex=0.6, bty="n")
+```
+
+7. Next, we plot the county populations from 1999. 
+```{r}
+POP1999 <- minnesota.shp$POP1999
+nclr <- 7
+plotclr <- brewer.pal(nclr,"Greens")
+class <- classIntervals(POP1999, nclr, style="equal", dataPrecision=4)
+colcode <- findColours(class, plotclr)
+plot(minnesota.shp)
+plot(minnesota.shp, col=colcode, add=T)
+title(main="Raw POP1999 variable - county populations in 1999")
+legend("bottomright", legend=names(attr(colcode, "table")),
+    fill=attr(colcode, "palette"), cex=0.6, bty="n")
+```
+
+8. Plot average income of counties 
+```{r}
+income <- minnesota.shp$income
+nclr <- 7
+plotclr <- brewer.pal(nclr,"Blues")
+class <- classIntervals(income, nclr, style="equal", dataPrecision=4)
+colcode <- findColours(class, plotclr)
+plot(minnesota.shp)
+plot(minnesota.shp, col=colcode, add=T)
+title(main="Income")
+legend("bottomright", legend=names(attr(colcode, "table")),
+    fill=attr(colcode, "palette"), cex=0.6, bty="n")
+
+### Another approach: reorder data initially; do not merge to shape file.
+
+# minnesota.shp <- readShapePoly("../../data/minnesota.shp",proj4string=CRS("+proj=longlat"))
+# 
+# newdata <- read.csv("../../data/minnesota.csv")
+# 
+# shape.names <- minnesota.shp$NAME
+# newdata <- newdata[order(factor(newdata$NAME,levels=shape.names)),]
+# 
+# income <- newdata$income
+# nclr <- 7
+# plotclr <- brewer.pal(nclr,"Blues")
+# class <- classIntervals(income, nclr, style="equal", dataPrecision=4)
+# colcode <- findColours(class, plotclr)
+# plot(minnesota.shp)
+# plot(minnesota.shp, col=colcode, add=T)
+# title(main="Income variable - entire shape file is merged with newdata")
+# legend("bottomright", legend=names(attr(colcode, "table")),
+#     fill=attr(colcode, "palette"), cex=0.6, bty="n")
+```
+
+```{r echo = F, eval = F}
+#### Calculating a few of the county influenza rates
+newdata[newdata$NAME=="Sherburne",]$cases/minnesota.shp[minnesota.shp$NAME=="Sherburne",]$POP1999*100
+newdata[newdata$NAME=="Anoka",]$cases/minnesota.shp[minnesota.shp$NAME=="Anoka",]$POP1999*100
+newdata[newdata$NAME=="Ramsey",]$cases/minnesota.shp[minnesota.shp$NAME=="Ramsey",]$POP1999*100
+newdata[newdata$NAME=="Washington",]$cases/minnesota.shp[minnesota.shp$NAME=="Washington",]$POP1999*100
+newdata[newdata$NAME=="McLeod",]$cases/minnesota.shp[minnesota.shp$NAME=="McLeod",]$POP1999*100
+newdata[newdata$NAME=="Carver",]$cases/minnesota.shp[minnesota.shp$NAME=="Carver",]$POP1999*100
+newdata[newdata$NAME=="Hennepin",]$cases/minnesota.shp[minnesota.shp$NAME=="Hennepin",]$POP1999*100
+newdata[newdata$NAME=="Scott",]$cases/minnesota.shp[minnesota.shp$NAME=="Scott",]$POP1999*100
+newdata[newdata$NAME=="Dakota",]$cases/minnesota.shp[minnesota.shp$NAME=="Dakota",]$POP1999*100
+newdata[newdata$NAME=="Pope",]$cases/minnesota.shp[minnesota.shp$NAME=="Pope",]$POP1999*100
+```
+

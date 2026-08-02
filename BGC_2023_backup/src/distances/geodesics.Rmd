@@ -1,0 +1,131 @@
+---
+title: "Calculating distances between locations on the surface of the earth"
+output: html_document
+date: "2023-10-02"
+---
+
+This example presents some examples of calculating distances between locations indexed by their geographic coordinates (longitude, latitude). The examples include calculating the great circle distances between two points on the earth's surface (assuming the earth to be a perfect sphere) and also using approximations by converting or projecting them to planar coordinates.   
+
+1. The file "distonearth.R" in the same directory as this file has several different functions for computing distances. We first source this file so that we are able to use the functions defined therein.
+```{r}
+source("distonearth.R")
+```
+
+2. We read a dataset called "SitesInput.txt" from the "data" directory that contains coordinates of some points. We create a matrix "loc" comprising longitude ("lon") as the first column and latitude ("lat") as the second column.
+```{r}
+colorado <- read.table("../../data/SitesInput.txt", header=T)
+
+lat <- as.numeric(colorado$lat)
+lon <- as.numeric(colorado$lon)
+loc <- cbind(lon,lat)
+```
+
+3. We now call the "geodetic.distance.matrix" in the "distonearth.R" file to compute the inter-site distance matrix and also record the maximum distance between any two locations in the dataset. 
+```{r}   
+dist <- geodetic.distance.matrix(lon,lat)
+
+max.dist <- max(dist)
+dist <- rdistearth(loc)
+max.dist <- max(dist)
+```
+
+4. We now use the "fields" package in R to compute the geodesic distances between a set of points.
+```{r}   
+library(fields)
+
+dist.fields <- rdist.earth(loc,miles=F)
+max.dist.fields <- max(dist.fields)
+```
+
+5. The "fields" package can also be used to calculate Euclidean distances. Here, one should convert the geographic coordinates to radians and scale the locations by the radius of the earth to approximately calculate the distance between the two points. 
+```{r}
+dist.euclid <- rdist(loc)*6371*pi/180
+max.dist.euclid <- max(dist.euclid)
+```
+
+6. The "chordal'' distance is calculated using the "distance.chord.matrix" function in the "distonearth.R" file.  
+```{r}
+dist.chord <- distance.chord.matrix(lon,lat)
+max.dist.chord <- max(dist.chord)
+``` 
+
+7. A "naive" Eucldiean distance between two points is calculated by simply converting degrees to radians and applying the Euclidean distance.
+```{r}
+dist.stretch <- distance.stretch.matrix(lon,lat)
+max.dist.stretch <- max(dist.euclid)
+```
+
+8. A transformation referred to as "Fuentes' transformation" in the text is calculated as follows.
+```{r}   
+loc.transformed <- lonlat.to.miles(loc)
+fuentes.dist <- rdist(loc.transformed)
+max.fuentes.dist <- max(fuentes.dist)
+```
+
+9. An example using coordinates of Chicago and Minneapolis.
+```{r}   
+Chicago <- c(-87.63,41.88)
+Minneapolis <- c(-93.22,44.89)
+newloc <- rbind(Chicago,Minneapolis)
+#Geodesic
+ChMn.geodesic <- rdistearth(newloc)[2,1]
+#Chord
+ChMn.chord <- rdistchord(newloc)[2,1]
+#Naive Euclidean
+ChMn.euclid <- rdisteuclid(newloc)[2,1]
+#Fuentes' Projection
+ChMn.transformed <- lonlat.to.miles(newloc)
+ChMn.fuentes <- rdist(ChMn.transformed)[2,1] 
+```
+
+9. Another example using coordinates of New York and New Orleans.
+```{r}
+NY <- c(-73.97,40.78)
+NO <- c(-90.25,29.98)
+newloc <- rbind(NY,NO)
+
+#Geodesic
+NYNO.geodesic <- rdistearth(newloc)[2,1]
+#Chord
+NYNO.chord <- rdistchord(newloc)[2,1]
+#Naive Euclidean
+NYNO.euclid <- rdisteuclid(newloc)[2,1]
+#Fuentes' Projection
+NYNO.transformed <- lonlat.to.miles(newloc)
+NYNO.fuentes <- rdist(NYNO.transformed)[2,1] 
+```
+
+10. Using map Projections from the "mapproj" library.
+```{r}
+library(mapproj)
+
+ChMn.mercator <- mapproject(c(Chicago[1],Minneapolis[1]),c(Chicago[2],Minneapolis[2]),projection="mercator")
+NYNO.mercator <- mapproject(c(NY[1],NO[1]),c(NY[2],NO[2]),projection="mercator")
+colorado.mercator <- mapproject(lon,lat,projection="mercator")
+
+ChMn.mercator.loc <- cbind(ChMn.mercator$x,ChMn.mercator$y)
+NYNO.mercator.loc <- cbind(NYNO.mercator$x,NYNO.mercator$y)
+colorado.mercator.loc <- cbind(colorado.mercator$x,colorado.mercator$y)
+
+ChMn.mercator.dist <- rdist(ChMn.mercator.loc)[2,1]*6371
+NYNO.mercator.dist <- rdist(NYNO.mercator.loc)[2,1]*6371
+colorado.mercator.max.dist <- max(rdist(colorado.mercator.loc)*6371)
+
+ChMn.sinusoidal <- mapproject(c(Chicago[1],Minneapolis[1]),c(Chicago[2],Minneapolis[2]),projection="sinusoidal")
+NYNO.sinusoidal <- mapproject(c(NY[1],NO[1]),c(NY[2],NO[2]),projection="sinusoidal")
+colorado.sinusoidal <- mapproject(lon,lat,projection="sinusoidal")
+
+ChMn.sinusoidal.loc <- cbind(ChMn.sinusoidal$x,ChMn.sinusoidal$y)
+NYNO.sinusoidal.loc <- cbind(NYNO.sinusoidal$x,NYNO.sinusoidal$y)
+colorado.sinusoidal.loc <- cbind(colorado.sinusoidal$x,colorado.sinusoidal$y)
+
+ChMn.sinusoidal.dist <- rdist(ChMn.sinusoidal.loc)[2,1]*6371
+NYNO.sinusoidal.dist <- rdist(NYNO.sinusoidal.loc)[2,1]*6371
+colorado.sinusoidal.max.dist <- max(rdist(colorado.sinusoidal.loc)*6371)
+
+#Manual Example
+x <- c(Chicago[1],Minneapolis[1])*6371*pi/180
+y.rad <- c(Chicago[2],Minneapolis[2])*pi/180
+y <- 6371*log(tan(pi/4 + y.rad/2))
+ChMn.mercator.dist.manual <- rdist(cbind(x,y))[2,1]
+

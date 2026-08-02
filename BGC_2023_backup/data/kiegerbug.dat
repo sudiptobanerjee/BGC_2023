@@ -1,0 +1,4 @@
+list(N = 9,  # number of observations
+y = c(1,1,1,1,0,1,1,1,0),                         # team win/loss
+ kieger = c(31,31,36,30,32,33,31,33,32),  # Kieger points
+ team = c(31,16,35,42,19,37,29,23,15))    # rest of team points

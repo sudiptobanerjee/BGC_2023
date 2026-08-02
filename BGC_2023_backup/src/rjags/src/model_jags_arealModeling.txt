@@ -1,0 +1,17 @@
+model
+{
+	for (i in 1:N) {
+		Y[i] ~ dnorm(mu[i], tausq)
+		mu[i] <- inprod(X[i,], beta) + w[i]
+		yFit[i] ~ dnorm(mu[i], tausq) ##Posterior predictive model fit
+		}
+		
+		w[1:N] ~ dmnorm(zeros, tausqSp*Q)
+		for (i in 1:p) { beta[i] ~ dnorm(0.0, 0.00001)}
+		tausq ~ dgamma(0.001, 0.001)
+		sigma <- 1/sqrt(tausq)
+		tausqSp ~ dgamma(0.01, 0.01)
+		sigmaSp <- 1/sqrt(tausqSp)
+		
+}
+

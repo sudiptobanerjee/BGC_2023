@@ -1,0 +1,438 @@
+## ----setup, include=FALSE-----------------------------------------------------
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 8
+)
+
+
+## ----helper_functions---------------------------------------------------------
+library(spBayes)
+library(rjags)
+library(knitr)
+
+# ---------------------------------------------------------------------
+# 1. Replicated Likelihood JAGS Composition Sampler (Inline Model)
+# ---------------------------------------------------------------------
+run_replicated_jags_composition <- function(X, Y, 
+                                            M_samples = 5000, 
+                                            a0 = 0.01, 
+                                            b0 = 0.01, 
+                                            m0 = NULL, 
+                                            M0_inv = NULL,
+                                            mu0 = NULL) {
+  N <- nrow(X)
+  P <- ncol(X)
+  
+  # Prior Setup
+  if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
+  
+  if (is.null(m0) && is.null(mu0)) {
+    m0  <- rep(0, P)
+    mu0 <- rep(0, P)
+  } else if (!is.null(mu0) && is.null(m0)) {
+    m0 <- as.vector(M0_inv %*% mu0)
+  } else if (!is.null(m0) && is.null(mu0)) {
+    R0_prec <- chol(M0_inv)
+    z0      <- forwardsolve(t(R0_prec), m0)
+    mu0     <- as.vector(backsolve(R0_prec, z0))
+  }
+  
+  # 1. Compute Analytical Posterior Parameters in R
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
+  
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
+  
+  YtY             <- as.numeric(crossprod(Y))
+  prior_quad_term <- as.numeric(crossprod(m0, mu0))
+  post_quad_term  <- sum(zN^2)
+  
+  a_N <- a0 + (N / 2)
+  b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
+  
+  # 2. Draw tau directly in R (Exact Marginal Sample)
+  tau_samples    <- rgamma(M_samples, shape = a_N, rate = b_N)
+  sigma2_samples <- 1 / tau_samples
+  
+  # 3. Precompute 3D precision array in R to bypass JAGS DAG compilation overhead
+  # Vectorized array multiplication replaces the slow for-loop
+  beta_prec_array <- array(rep(M0_inv, each = M_samples), dim = c(M_samples, P, P)) * tau_samples
+  
+  # 4. Replicate Data Matrix Y_rep (M_samples x N)
+  Y_rep <- matrix(Y, nrow = M_samples, ncol = N, byrow = TRUE)
+  
+  # 5. Inline JAGS Model String
+  model_string <- "
+  model {
+    for (m in 1:M_samples) {
+      beta[m, 1:P] ~ dmnorm(beta_mean_prior[1:P], beta_prec[m, 1:P, 1:P])
+      for (i in 1:N) {
+        mu_y[m, i] <- inprod(X[i, 1:P], beta[m, 1:P])
+        Y_rep[m, i] ~ dnorm(mu_y[m, i], tau[m])
+      }
+    }
+  }
+  "
+  
+  jags_data <- list(
+    N = N,
+    P = P,
+    M_samples = M_samples,
+    X = X,
+    Y_rep = Y_rep,
+    tau = tau_samples, 
+    beta_prec = beta_prec_array,
+    beta_mean_prior = as.numeric(mu0)
+  )
+  
+  # 6. Compile and Sample in 1 Iteration without Adaptation
+  jags_model <- jags.model(
+    textConnection(model_string), 
+    data = jags_data, 
+    n.chains = 1,
+    n.adapt = 0,
+    quiet = TRUE 
+  )
+  
+  jags_out <- jags.samples(
+    jags_model, 
+    variable.names = c("beta"), 
+    n.iter = 1,
+    progress.bar = "none"
+  )
+  
+  beta_samples_jags <- jags_out$beta[, , 1, 1]
+  
+  draws <- cbind(
+    beta_samples_jags, 
+    sigma2 = sigma2_samples,
+    tau    = tau_samples,
+    sigma  = sqrt(sigma2_samples)
+  )
+  
+  if (is.null(colnames(X))) {
+    colnames(draws)[1:P] <- paste0("beta[", 1:P, "]")
+  } else {
+    colnames(draws)[1:P] <- colnames(X)
+  }
+  
+  return(list(draws = draws))
+}
+
+# ---------------------------------------------------------------------
+# 2. Direct JAGS Composition Sampler (Likelihood-Free Inline Model)
+# ---------------------------------------------------------------------
+run_direct_jags_composition <- function(X, Y, 
+                                        n_samples = 5000, 
+                                        a0 = 0.01, 
+                                        b0 = 0.01, 
+                                        m0 = NULL, 
+                                        M0_inv = NULL,
+                                        mu0 = NULL) {
+  N <- nrow(X)
+  P <- ncol(X)
+  
+  if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
+  
+  if (is.null(m0) && is.null(mu0)) {
+    m0  <- rep(0, P)
+    mu0 <- rep(0, P)
+  } else if (!is.null(mu0) && is.null(m0)) {
+    m0 <- as.vector(M0_inv %*% mu0)
+  } else if (!is.null(m0) && is.null(mu0)) {
+    R0_prec <- chol(M0_inv)
+    z0      <- forwardsolve(t(R0_prec), m0)
+    mu0     <- as.vector(backsolve(R0_prec, z0))
+  }
+  
+  # 1. Compute Analytical Posterior Parameters in R
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
+  
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
+  
+  YtY             <- as.numeric(crossprod(Y))
+  prior_quad_term <- as.numeric(crossprod(m0, mu0))
+  post_quad_term  <- sum(zN^2)
+  
+  a_N <- a0 + (N / 2)
+  b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
+  
+  # 2. Inline JAGS Model String
+  model_string <- "
+  model {
+    # Exact Marginal Draw for Precision
+    tau ~ dgamma(a_N, b_N)
+    sigma2 <- 1 / tau
+    
+    # Construct Conditional Precision Matrix for Beta
+    for (j in 1:P) {
+      for (k in 1:P) {
+        Omega[j, k] <- tau * M_inv[j, k]
+      }
+    }
+    
+    # Exact Conditional Draw for Beta Coefficients
+    beta[1:P] ~ dmnorm(mu[1:P], Omega[1:P, 1:P])
+  }
+  "
+  
+  jags_data <- list(
+    P = P,
+    a_N = a_N,
+    b_N = b_N,
+    mu = as.numeric(mu),
+    M_inv = M_inv
+  )
+  
+  jags_model <- jags.model(
+    textConnection(model_string),
+    data = jags_data,
+    n.chains = 1,
+    n.adapt = 0,
+    quiet = TRUE
+  )
+  
+  coda_samples <- coda.samples(
+    model = jags_model,
+    variable.names = c("beta", "sigma2", "tau"),
+    n.iter = n_samples,
+    progress.bar = "none"
+  )
+  
+  draws <- as.matrix(coda_samples)
+  
+  beta_cols <- grep("beta", colnames(draws))
+  if (is.null(colnames(X))) {
+    colnames(draws)[beta_cols] <- paste0("beta[", 1:P, "]")
+  } else {
+    colnames(draws)[beta_cols] <- colnames(X)
+  }
+  
+  draws <- cbind(draws, sigma = sqrt(draws[, "sigma2"]))
+  
+  # Standardize Column Order: (betas, sigma2, tau, sigma)
+  col_order <- c(colnames(X), "sigma2", "tau", "sigma")
+  draws <- draws[, col_order]
+  
+  return(list(draws = draws))
+}
+
+
+## ----data_prep----------------------------------------------------------------
+# Load Data
+rawData <- read.table("../../data/data.txt", header = TRUE)
+
+# Prepare response and scaled design matrix
+Y <- rawData$Y
+X_raw <- as.matrix(rawData[, -1])
+X_scaled <- scale(X_raw)
+X <- cbind(Intercept = 1, X_scaled)
+
+N <- nrow(X)
+P <- ncol(X)
+n_samples <- 5000
+
+# Shared Prior Specifications (Prior Precision Factor M0_inv)
+M0_inv <- diag(0.01, P) # Equivalent to M0 = diag(100, P)
+m0     <- rep(0, P)     # Precision-weighted mean (m0 = M0_inv %*% mu0 = 0)
+a0     <- 0.01
+b0     <- 0.01
+
+cat("Dataset loaded successfully:", N, "observations and", P, "predictors (including Intercept).\n")
+
+
+## ----exact_jags_replicated----------------------------------------------------
+set.seed(123)
+
+cat("Executing parallel universe composition sampling in JAGS...\n")
+runtime_rep <- system.time({
+  jags_rep_results <- run_replicated_jags_composition(
+    X = X, 
+    Y = Y, 
+    M_samples = n_samples,
+    a0 = a0,
+    b0 = b0,
+    m0 = m0,
+    M0_inv = M0_inv
+  )
+})
+
+cat("Replicated Likelihood JAGS Runtime (seconds):\n")
+print(runtime_rep)
+
+rep_samples <- jags_rep_results$draws
+
+# Summary Statistics
+rep_means     <- colMeans(rep_samples)
+rep_sds       <- apply(rep_samples, 2, sd)
+rep_quantiles <- crossprod(apply(rep_samples, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))
+
+summary_rep <- round(cbind(Mean = rep_means, SD = rep_sds, rep_quantiles), 4)
+kable(summary_rep, caption = "JAGS Replicated Likelihood Posterior Summary")
+
+
+## ----exact_jags_direct--------------------------------------------------------
+set.seed(123)
+
+cat("Executing exact direct sampling in JAGS (Likelihood-Free)...\n")
+runtime_dir <- system.time({
+  jags_dir_results <- run_direct_jags_composition(
+    X = X,
+    Y = Y,
+    n_samples = n_samples,
+    a0 = a0,
+    b0 = b0,
+    m0 = m0,
+    M0_inv = M0_inv
+  )
+})
+
+cat("Direct Likelihood-Free JAGS Runtime (seconds):\n")
+print(runtime_dir)
+
+dir_samples <- jags_dir_results$draws
+
+# Summary Statistics
+dir_means     <- colMeans(dir_samples)
+dir_sds       <- apply(dir_samples, 2, sd)
+dir_quantiles <- crossprod(apply(dir_samples, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))
+
+summary_dir <- round(cbind(Mean = dir_means, SD = dir_sds, dir_quantiles), 4)
+kable(summary_dir, caption = "JAGS Direct Posterior Summary (Likelihood-Free)")
+
+
+## ----compare_rep_vs_spbayes---------------------------------------------------
+df <- data.frame(Y = Y, X_scaled)
+
+# 1. Run Replicated JAGS
+set.seed(123)
+jags_rep <- run_replicated_jags_composition(
+  X = X, Y = Y, M_samples = n_samples,
+  a0 = a0, b0 = b0, m0 = m0, M0_inv = M0_inv
+)$draws
+
+# 2. Run spBayes
+set.seed(123)
+spb_model_1 <- bayesLMConjugate(
+  formula = Y ~ ., data = df, n.samples = n_samples,
+  beta.prior.mean = rep(0, P), 
+  beta.prior.precision = M0_inv,
+  prior.shape = a0, prior.rate = b0
+)
+
+# Extract and align spBayes parameter columns
+spb_raw1     <- spb_model_1$p.beta.tauSq.samples
+spb_var1     <- spb_raw1[, P + 1]
+spb_sigma1   <- sqrt(spb_var1)
+spb_tau1     <- 1 / spb_var1
+
+spb_samples1 <- cbind(spb_raw1[, 1:P], sigma2 = spb_var1, tau = spb_tau1, sigma = spb_sigma1)
+colnames(spb_samples1) <- colnames(jags_rep)
+
+# Display Posterior Summaries
+s_jags_rep <- round(cbind(Mean = colMeans(jags_rep), SD = apply(jags_rep, 2, sd),
+                           crossprod(apply(jags_rep, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))), 4)
+
+s_spb1     <- round(cbind(Mean = colMeans(spb_samples1), SD = apply(spb_samples1, 2, sd),
+                           crossprod(apply(spb_samples1, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))), 4)
+
+kable(s_jags_rep, caption = "Posterior Summary: Replicated JAGS Sampler")
+kable(s_spb1, caption = "Posterior Summary: spBayes::bayesLMConjugate")
+
+
+## ----qqplot_rep_vs_spbayes, fig.height=9, fig.width=12------------------------
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- colnames(jags_rep)
+
+for (param in param_names) {
+  x_jags    <- sort(jags_rep[, param])
+  y_spbayes <- sort(spb_samples1[, param])
+  r2        <- cor(x_jags, y_spbayes)^2
+
+  plot(x_jags, y_spbayes,
+       main = param,
+       xlab = "composition sampling in rjags", 
+       ylab = "bayesLMConjugate in spBayes",
+       pch = 20, col = rgb(0.1, 0.2, 0.7, alpha = 0.5))
+  
+  abline(a = 0, b = 1, col = "red", lwd = 2)
+  legend("topleft", legend = bquote(R^2 == .(format(r2, digits = 4))), 
+         bty = "n", text.col = "black")
+}
+par(mfrow = c(1, 1))
+
+# Save PNG copy to disk
+dev.copy(png, "comparisonsJagsVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
+dev.off()
+
+
+## ----compare_dir_vs_spbayes---------------------------------------------------
+# 1. Run Direct JAGS
+set.seed(123)
+jags_dir <- run_direct_jags_composition(
+  X = X, Y = Y, n_samples = n_samples,
+  a0 = a0, b0 = b0, m0 = m0, M0_inv = M0_inv
+)$draws
+
+# 2. Run spBayes
+set.seed(123)
+spb_model_2 <- bayesLMConjugate(
+  formula = Y ~ ., data = df, n.samples = n_samples,
+  beta.prior.mean = rep(0, P), 
+  beta.prior.precision = M0_inv,
+  prior.shape = a0, prior.rate = b0
+)
+
+# Extract and align spBayes parameter columns
+spb_raw2     <- spb_model_2$p.beta.tauSq.samples
+spb_var2     <- spb_raw2[, P + 1]
+spb_sigma2   <- sqrt(spb_var2)
+spb_tau2     <- 1 / spb_var2
+
+spb_samples2 <- cbind(spb_raw2[, 1:P], sigma2 = spb_var2, tau = spb_tau2, sigma = spb_sigma2)
+colnames(spb_samples2) <- colnames(jags_dir)
+
+# Display Posterior Summaries
+s_jags_dir <- round(cbind(Mean = colMeans(jags_dir), SD = apply(jags_dir, 2, sd),
+                           crossprod(apply(jags_dir, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))), 4)
+
+s_spb2     <- round(cbind(Mean = colMeans(spb_samples2), SD = apply(spb_samples2, 2, sd),
+                           crossprod(apply(spb_samples2, 2, quantile, probs = c(0.5, 0.025, 0.975)), diag(3))), 4)
+
+kable(s_jags_dir, caption = "Posterior Summary: Direct JAGS Sampler")
+kable(s_spb2, caption = "Posterior Summary: spBayes::bayesLMConjugate")
+
+
+## ----qqplot_dir_vs_spbayes, fig.height=9, fig.width=12------------------------
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- colnames(jags_dir)
+
+for (param in param_names) {
+  x_jags    <- sort(jags_dir[, param])
+  y_spbayes <- sort(spb_samples2[, param])
+  r2        <- cor(x_jags, y_spbayes)^2
+
+  plot(x_jags, y_spbayes,
+       main = param,
+       xlab = "composition sampling in rjags", 
+       ylab = "bayesLMConjugate sampler in spBayes",
+       pch = 20, col = rgb(0.1, 0.2, 0.7, alpha = 0.5))
+  
+  abline(a = 0, b = 1, col = "red", lwd = 2)
+  legend("topleft", legend = bquote(R^2 == .(format(r2, digits = 4))), 
+         bty = "n", text.col = "black")
+}
+par(mfrow = c(1, 1))
+
+# Save PNG copy to disk
+dev.copy(png, "comparisonsJagsDirectVsSpBayesQ-Qplots.png", width = 1200, height = 900, res = 150)
+dev.off()
+

@@ -13,7 +13,7 @@ run_direct_jags_composition <- function(X, Y,
   P <- ncol(X)
   
   # -------------------------------------------------------------------
-  # Setup Prior Precision Factor M0_inv and Mean Vectors (m0, mu0)[cite: 14]
+  # Setup Prior Precision Factor M0_inv and Mean Vectors (m0, mu0)
   # -------------------------------------------------------------------
   if (is.null(M0_inv)) M0_inv <- diag(0.01, P)
   
@@ -24,22 +24,19 @@ run_direct_jags_composition <- function(X, Y,
     m0 <- as.vector(M0_inv %*% mu0)
   } else if (!is.null(m0) && is.null(mu0)) {
     R0_prec <- chol(M0_inv)
-    # Optimized triangular solve using transpose = TRUE
-    z0      <- backsolve(R0_prec, m0, transpose = TRUE)
+    z0      <- forwardsolve(t(R0_prec), m0)
     mu0     <- as.vector(backsolve(R0_prec, z0))
   }
   
   # -------------------------------------------------------------------
-  # 1. Compute Analytical Posterior Parameters in R[cite: 14]
+  # 1. Compute Analytical Posterior Parameters in R
   # -------------------------------------------------------------------
-  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1[cite: 14]
-  RN    <- chol(M_inv)                             # Cholesky factor of M^-1[cite: 14]
+  M_inv <- M0_inv + crossprod(X)                  # Posterior precision factor M^-1
+  RN    <- chol(M_inv)                             # Cholesky factor of M^-1
   
-  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m[cite: 14]
-  
-  # Optimized triangular solve using transpose = TRUE
-  zN    <- backsolve(RN, m_vec, transpose = TRUE)
-  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m[cite: 14]
+  m_vec <- m0 + crossprod(X, Y)                   # Precision-weighted posterior mean m
+  zN    <- forwardsolve(t(RN), m_vec)
+  mu    <- as.vector(backsolve(RN, zN))           # Posterior mean mu = M * m
   
   YtY             <- as.numeric(crossprod(Y))
   prior_quad_term <- as.numeric(crossprod(m0, mu0))
@@ -49,7 +46,7 @@ run_direct_jags_composition <- function(X, Y,
   b_N <- as.numeric(b0 + 0.5 * (YtY + prior_quad_term - post_quad_term))
   
   # -------------------------------------------------------------------
-  # 2. Inline Likelihood-Free JAGS Model Definition[cite: 14]
+  # 2. Inline Likelihood-Free JAGS Model Definition
   # -------------------------------------------------------------------
   model_string <- "
   model {
@@ -78,7 +75,7 @@ run_direct_jags_composition <- function(X, Y,
   )
   
   # -------------------------------------------------------------------
-  # 3. Compile and Sample Direct Forward Composition[cite: 14]
+  # 3. Compile and Sample Direct Forward Composition
   # -------------------------------------------------------------------
   jags_model <- jags.model(
     textConnection(model_string),
@@ -106,7 +103,7 @@ run_direct_jags_composition <- function(X, Y,
   
   draws <- cbind(draws, sigma = sqrt(draws[, "sigma2"]))
   
-  # Standardize Column Order: (betas, sigma2, tau, sigma)[cite: 14]
+  # Standardize Column Order: (betas, sigma2, tau, sigma)
   col_order <- c(colnames(X), "sigma2", "tau", "sigma")
   draws <- draws[, col_order]
   

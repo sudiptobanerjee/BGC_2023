@@ -1,0 +1,15 @@
+model
+{
+	for (i in 1:N) {
+		Y[i] ~ dnorm(mu[i], tausq)
+		mu[i] <- inprod(X[i,1:p], beta[1:p])
+		yFit[i] ~ dnorm(mu[i], tausq)
+	}
+		
+		for (i in 1:p) { beta[i] ~ dflat()}
+		tausq ~ dgamma(0.001, 0.001)
+		sigma <- 1/sqrt(tausq)
+		
+}
+
+

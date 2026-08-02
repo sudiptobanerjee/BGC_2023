@@ -1,0 +1,66 @@
+##Columns: 1. state name 
+##         2. verbal score on SAT
+##         3. math score on SAT
+##         4. % of eligible students taking exam in that state
+
+##These data represent the average scores on the SAT for 1999.  These
+##data were recorded by Prof. Melanie Wall from an article that was
+##written in the Star Tribune on Wed. Sept 1, 1999.  The source is the
+##College Board.
+
+##Note that the data set contains 52 rows:  the 50 states *plus* the
+##District of Columbia *and* a total average for the entire US.
+
+ala	561	555	9
+alaska	516	514	50
+ariz	524	525	34
+ark	563	556	6
+calif	497	514	49
+colo	536	540	32
+conn	510	509	80
+dela	503	497	67
+d.c.	494	478	77
+fla	499	498	53
+ga	487	482	63
+hawaii	482	513	52
+idaho	542	540	16
+ill	569	585	12
+ind	496	498	60
+iowa	594	598	5
+kan	578	576	9
+ky	547	547	12
+la	561	558	8
+maine	507	503	68
+md	507	507	65
+mass	511	511	78
+mich	557	565	11
+minn	586	598	9
+miss	563	548	4
+mo	572	572	8
+mont	545	546	21
+neb	568	571	8
+nev	512	517	34
+nh	520	518	72
+nj	498	510	80
+nm	549	542	12
+ny	495	502	76
+nc	493	493	61
+nd	594	605	5
+ohio	534	538	25
+okla	567	560	8
+ore	525	525	53
+pa	498	495	70
+ri	504	499	70
+sc	479	475	61
+sd	585	588	4
+tenn	559	553	13
+texas	494	499	50
+utah	570	568	5
+vt	514	506	70
+va	508	499	65
+wash	525	526	52
+wva	527	512	18
+wis	584	595	7
+wyo	546	551	10
+us	505	511	43
+			

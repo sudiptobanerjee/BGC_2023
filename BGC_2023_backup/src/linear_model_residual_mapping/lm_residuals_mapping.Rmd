@@ -1,0 +1,136 @@
+---
+title: "Creating residual maps from linear regression"
+output: html_document
+date: "2023-10-04"
+---
+
+1. Remove all objects from R workspace---good programming practice and can help debug your code better.
+```{r}   
+rm(list = ls())
+```
+
+2. Load the "tidyr" package:
+```{r}
+library(tidyr)
+```
+
+3. Read the age adjusted 5-year rates of cancers across the USA. Extract lung cancer rates for California. Order the data by county names.
+```{r}
+rate_5y <- read.csv("data/age_adjusted.csv")
+rate_CA = rate_5y[substr(rate_5y$State_county,1,2) == "CA",]
+rate_lung = rate_CA[rate_CA$Site_recode_ICD_O_3_WHO_2008=="Lung and Bronchus",]
+rate_lung = rate_lung[order(readr::parse_number(as.character(rate_lung$State_county))),]
+```
+
+4. We will need to extract county names from the database. First inspect the "State_county" variable to see the naming pattern.
+```{r}
+head(rate_lung)
+rate_lung$State_county
+```
+
+5. Get rid of "CA:" from the names
+```{r}
+rate_lung$State_county = sapply(strsplit(rate_lung$State_county, ":"), function(x) x[2])
+```
+6. Get rid of "County" inside the names
+```{r}   
+rate_lung$State_county = sub("County", "", rate_lung$State_county)
+```
+
+7. Get rid of "Registry" inside the names (appears only for "Los Angeles")
+```{r}   
+rate_lung$State_county = sub("Registry", "", rate_lung$State_county)
+```
+
+8. Get rid of "the last 7 characters" from the names (they represent FIPS codes)
+```{r}
+rate_lung$State_county = substr(rate_lung$State_county, 1, nchar(rate_lung$State_county)-7)
+```
+
+9. Get rid of unnecessary white spaces
+```{r}   
+rate_lung$State_county = trimws(rate_lung$State_county)
+```
+10. Rename "State_county" as simply "County"
+```{r}
+names(rate_lung)[names(rate_lung) == "State_county"] <- "County"
+```
+
+11. Remove row numbers from the data frame:
+```{r}
+row.names(rate_lung) <- NULL
+```
+
+This completes the creation of the dataframe "rate_lung". 
+
+12. Read the data on smoking rates and inspect its column names.
+```{r}
+smoking <- read.csv("data/smoking.csv")
+head(smoking)
+```
+
+13. Rename its variables to "County" and "Smoking_Rate"
+```{r}
+names(smoking) <- c("County", "Smoking_Rate")
+```
+
+14. We will merge the "smoking" data frame with the rate_lung data frame by column "County". It will be important to check for hidden whitespaces in this column for both data frames.
+```{r}
+smoking$County <- trimws(smoking$County, whitespace="[\t\r\n\\h\\v]")
+```
+
+15. Also make sure that Smoking_Rate is numeric
+```{r}
+smoking$Smoking_Rate <- as.numeric(trimws(sub("%", "", smoking$Smoking_Rate), whitespace="[\t\r\n\\h\\v]"))
+```
+
+16. Now we will merge the data into a single data frame 
+```{r}
+rate_lung <- merge(rate_lung, smoking, by="County")
+```
+
+17. Our first model: Run a simple linear regression of "Age_Adjusted_Rate" on "Smoking_Rate"
+```{r}
+out.lm <- lm(Age_Adjusted_Rate ~ Smoking_Rate, data = rate_lung)
+summary(out.lm)
+```
+
+18. Obtain the residuals from the linear regression model
+```{r}
+resid.lm <- residuals(out.lm)
+```
+
+19. Plot the residuals on a map: We know how to do this! Begin by loading some libraries. 
+```{r}
+library(maps)
+library(sf)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(classInt)
+```
+
+20. Get county map for California from R “maps” library and create an “sf” object.
+```{r}
+ca.county = map("county","california", fill=TRUE, plot=FALSE)
+ca.county.sf <- st_as_sf(ca.county)
+```
+
+21. Expand the "sf" object to include the variable you wish to plot. Note that resid.lm is already ordered by county names so it will align.
+```{r}
+ca.county.sf$resid.lm <- resid.lm
+```
+
+22. Create a color palette.
+```{r}   
+brks_resid.lm = quantile(ca.county.sf$resid.lm, c(0, 0.2, 0.4, 0.6, 0.8, 1))
+
+color.palette = rev(brewer.pal(5,"RdBu"))
+class(color.palette)
+```
+
+23. Plot the residuals on the map. What do you see?
+```{r}   
+plot(ca.county.sf["resid.lm"], pal = color.palette, breaks = brks_resid.lm, main = "Lung cancer rates after accounting for age and smoking")
+```
+
