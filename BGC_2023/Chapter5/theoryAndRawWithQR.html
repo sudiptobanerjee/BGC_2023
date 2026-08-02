@@ -11,7 +11,7 @@
 
 <meta name="author" content="Sudipto Banerjee" />
 
-<meta name="date" content="2026-07-30" />
+<meta name="date" content="2026-08-02" />
 
 <title>Bayesian Linear Regression via QR Decomposition</title>
 
@@ -361,7 +361,7 @@ Decomposition</h1>
 <h3 class="subtitle">Theory, Composition Sampling Algorithms, and Raw R
 Implementation</h3>
 <h4 class="author">Sudipto Banerjee</h4>
-<h4 class="date">2026-07-30</h4>
+<h4 class="date">2026-08-02</h4>
 
 </div>
 
@@ -512,6 +512,23 @@ preserves numerical precision, and operates in <span class="math inline">\(O(p^3
 <div id="composition-sampling-algorithms-for-parameter-inference" class="section level1" number="3">
 <h1><span class="header-section-number">3</span> Composition Sampling
 Algorithms for Parameter Inference</h1>
+<p>We will draw <em>exact</em> posterior samples from the joint
+posterior distribution <span class="math inline">\(p( \beta,\sigma^2
+\mid y)\)</span> using <strong>Composition Sampling.</strong> Here is a
+brief overview of compostion sampling. Composition sampling provides a
+method to draw exact samples from a joint distribution by utilizing
+marginal and conditional sampling. For two random variables <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> with a joint density function <span class="math inline">\(f(X,Y)\)</span>, the density at <span class="math inline">\((x,y)\)</span> can be written as <span class="math inline">\(f_{X,Y}(x,y) = f_X(x)f_{Y|X}(y|x)\)</span>.
+Suppose we can draw samples from <span class="math inline">\(f_X\)</span> and <span class="math inline">\(f_{Y|X}\)</span> for any given <span class="math inline">\(X = x\)</span>. To generate <span class="math inline">\(N\)</span> samples from this joint distribution,
+one first draws a sample <span class="math inline">\(X_i^* = x_i \sim
+f_X\)</span> from the marginal distribution of <span class="math inline">\(X\)</span> for <span class="math inline">\(i = 1,
+\dots, N\)</span>. Then, for each drawn value <span class="math inline">\(x_i\)</span>, a subsequent sample <span class="math inline">\(Y_i^* \sim f_{Y|X}(\cdot \mid x_i)\)</span> is
+drawn for <span class="math inline">\(i = 1,\dots, N\)</span>.</p>
+<p>In conjugate models, it is often easy to draw samples from <span class="math inline">\(p(\theta_1 \mid y)\)</span> and from <span class="math inline">\(p(\theta_2 \mid \theta_1, y)\)</span>. We first
+draw <span class="math inline">\(N\)</span> samples <span class="math inline">\(\theta_{1(i) } \sim p(\theta_1 \mid y)\)</span>
+and, for each drawn value <span class="math inline">\(\theta_{1(i)}\)</span>, we draw <span class="math inline">\(\theta_{2(i)} \sim p(\theta_2 \mid \theta_{1(i)},
+y)\)</span>. Hence, in Bayesian linear regression, we first draw <span class="math inline">\(\sigma^2i_{(i)} \sim p(\sigma^2 \mid y)\)</span>
+and then draw <span class="math inline">\(\beta_{(i)} \sim p(\beta \mid
+y, \sigma^2_{(i)})\)</span> using the previously drawn value of <span class="math inline">\(\sigma^2_{(i)}\)</span>.</p>
 <div id="algorithm-1-general-conjugate-prior-case" class="section level2" number="3.1">
 <h2><span class="header-section-number">3.1</span> Algorithm 1: General
 Conjugate Prior Case</h2>
@@ -1413,14 +1430,14 @@ kable(benchmark_df, caption = &quot;Execution Time Benchmarking for 10,000 Draws
 <tr class="odd">
 <td align="left">Simulated Data (n = 250, p = 3)</td>
 <td align="center">0.0050</td>
-<td align="center">0.0080</td>
-<td align="center">0.62x</td>
+<td align="center">0.0090</td>
+<td align="center">0.56x</td>
 </tr>
 <tr class="even">
 <td align="left">Empirical Data (n = 1369, p = 9)</td>
-<td align="center">0.0190</td>
-<td align="center">0.0180</td>
-<td align="center">1.06x</td>
+<td align="center">0.0200</td>
+<td align="center">0.0280</td>
+<td align="center">0.71x</td>
 </tr>
 </tbody>
 </table>
