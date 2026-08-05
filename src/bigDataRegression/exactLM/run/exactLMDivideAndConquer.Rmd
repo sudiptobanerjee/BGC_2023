@@ -7,6 +7,17 @@ output:
     theme: flatly
 ---
 
+
+*Note:* To generate this HTML file, run `renderExactLMDivideAndConquer.sh` in the terminal from the `src/bigDataRegression/exactLM/run` directory. Alternatively find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bigDataRegression/exactLM/run
+./renderExactLMDivideAndConquer.sh
+```
+
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(dplyr)
