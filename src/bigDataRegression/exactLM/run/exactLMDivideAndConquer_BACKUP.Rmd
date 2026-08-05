@@ -1,0 +1,150 @@
+---
+title: "Exact Divide and Conquer Inference in Bayesian Linear Regression"
+author: "Sudipto Banerjee"
+output: 
+  html_document:
+    toc: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+
+# Source the custom divide and conquer script
+source("../src/rawSamplerDivideAndConquer.r")
+```
+
+## Section 1: Partition the Data
+
+First, we read the data, which includes the variables `Y`, `X1` through `X6`, `Lat`, and `Longi`. We partition the total 1369 rows into 10 blocks: the first 9 datasets will have exactly 130 rows, and the 10th dataset will contain the remaining 199 rows.
+
+```{r partition_data}
+# 1. Load Data
+data <- read.table("../data/data.txt", header = TRUE)
+
+# Prepare the Model Matrix and Response Vector
+X_full <- as.matrix(cbind(Intercept = 1, data[, c("X1", "X2", "X3", "X4", "X5", "X6", "Lat", "Longi")]))
+y_full <- as.numeric(data$Y)
+
+# 2. Partition into Blocks
+T_blocks <- 10
+block_size <- 130
+total_n <- nrow(X_full)
+
+X_list <- list()
+y_list <- list()
+
+start_idx <- 1
+for (t in 1:T_blocks) {
+  if (t < T_blocks) {
+    end_idx <- start_idx + block_size - 1
+  } else {
+    end_idx <- total_n # The final block absorbs the remainder (199 rows)
+  }
+  
+  X_list[[t]] <- X_full[start_idx:end_idx, , drop = FALSE]
+  y_list[[t]] <- y_full[start_idx:end_idx]
+  
+  start_idx <- end_idx + 1
+}
+
+cat("Successfully created", length(X_list), "data blocks.\n")
+cat("Rows in block 1-9:", nrow(X_list[[1]]), "| Rows in block 10:", nrow(X_list[[10]]), "\n")
+```
+
+## Section 2: Sequential Bayesian Updating
+
+Here we implement the block-sequential updating. The analytic expressions for the posterior at block t become the conjugate Normal-Gamma prior for block t+1. After T=10 blocks, we draw N=5000 exact samples from the final posterior distribution.
+
+```{r seq_update}
+# Setup Priors (Weakly Informative)
+p <- ncol(X_full)
+M0_inv <- matrix(0, nrow = p, ncol = p)
+m0 <- rep(0, p)
+a0 <- 0.01
+b0 <- 0.01
+N_samples <- 5000
+
+# Run Divide and Conquer Sampler (T = 10)
+set.seed(123)
+res_T10 <- rawSamplerDivideAndConquer(
+  X_list = X_list, 
+  y_list = y_list, 
+  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0, 
+  N = N_samples
+)
+
+# Summarize T=10
+draws_T10 <- as.data.frame(res_T10$draws)
+summary_T10 <- data.frame(
+  Parameter = colnames(draws_T10),
+  Mean_T10 = colMeans(draws_T10),
+  SD_T10 = apply(draws_T10, 2, sd)
+)
+kable(summary_T10, digits = 4, caption = "Posterior Summaries (Divide and Conquer, T=10)")
+```
+
+## Section 3: Comparisons
+
+To prove the exactness of the divide and conquer approach, we now process the dataset as a single block (T=1) and compare the samples. Because the updating scheme uses sufficient statistics, the theoretical posterior is mathematically identical. 
+
+```{r exact_comparison}
+# Run Single Block Sampler (T = 1)
+set.seed(123) # Use same seed to demonstrate distributional equivalence
+res_T1 <- rawSamplerDivideAndConquer(
+  X_list = list(X_full), 
+  y_list = list(y_full), 
+  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0, 
+  N = N_samples
+)
+
+draws_T1 <- as.data.frame(res_T1$draws)
+summary_T1 <- data.frame(
+  Parameter = colnames(draws_T1),
+  Mean_T1 = colMeans(draws_T1),
+  SD_T1 = apply(draws_T1, 2, sd)
+)
+
+# Merge summaries
+comparison_df <- merge(summary_T1, summary_T10, by = "Parameter")
+kable(comparison_df, digits = 4, caption = "Posterior Comparison: T=1 vs T=10")
+```
+
+### Q-Q Plots for Distributional Validation
+
+To visually confirm that the resulting distributions are practically indistinguishable, we plot the sorted posterior samples against one another. The 45-degree line represents perfect equality, and R-squared indicates the correlation.
+
+```{r qq_plots, fig.width=10, fig.height=8}
+plot_list <- list()
+params_to_plot <- c("Intercept", "X1", "Lat", "sigma2")
+
+par(mfrow=c(2,2))
+for(param in params_to_plot) {
+  
+  # Sort samples for Q-Q alignment
+  q_T1 <- sort(draws_T1[[param]])
+  q_T10 <- sort(draws_T10[[param]])
+  
+  # Calculate R-squared for the exactness of the match
+  r_squared <- cor(q_T1, q_T10)^2
+  
+  df_plot <- data.frame(Exact_T1 = q_T1, Sequential_T10 = q_T10)
+  
+  p_plot <- ggplot(df_plot, aes(x = Exact_T1, y = Sequential_T10)) +
+    geom_point(alpha = 0.3, color = "steelblue") +
+    geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", linewidth = 1) +
+    labs(
+      title = paste("Q-Q Plot:", param),
+      subtitle = paste("R-squared =", round(r_squared, 6)),
+      x = "Exact Posterior (T = 1)",
+      y = "Sequential Posterior (T = 10)"
+    ) +
+    theme_bw()
+  
+  print(p_plot)
+}
+```
