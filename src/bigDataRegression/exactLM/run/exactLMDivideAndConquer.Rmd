@@ -16,7 +16,88 @@ cd src/bigDataRegression/exactLM/run
 ./renderExactLMDivideAndConquer.sh
 ```
 
+## Theory: Bayesian Updating with Independent Data
 
+In a Bayesian framework, when dealing with independent data blocks conditionally on the parameters $\theta = \{\beta,\sigma^2\}$, we can sequentially update our posterior distribution for blocks $t=1,2,\ldots,T$. 
+
+By applying Bayes' theorem, the joint probability can be factored as follows:
+$$
+\begin{aligned}
+p(\theta \mid y_1,\ldots,y_t) &\propto p(\theta, y_1,\ldots, y_{t-1}, y_{t}) \\ 
+&\propto p(\theta, y_1,\ldots, y_{t-1}) \times p(y_t \mid \theta, y_1,\ldots, y_{t-1}) \\
+&\propto p(\theta \mid y_1,\ldots, y_{t-1}) \times p(y_t\mid \theta)\;.
+\end{aligned}
+$$
+
+Because the data is assumed to be independent given $\theta$, the term $p(y_t \mid \theta, y_1,\ldots, y_{t-1})$ simplifies directly to the likelihood of the current block, $p(y_t \mid \theta)$. Consequently, the posterior from the previous time step $t-1$ becomes the exact prior for the next time step $t$. This property allows us to "Divide & Conquer" by loading manageable blocks of data into memory one at a time.
+
+## Model Setup: Bayesian Regression
+
+To apply this to linear regression, we partition our full dataset into independent blocks denoted as $\{y_t, X_t\}$ for $t=1,2,\ldots,T$. Here, $y_t$ is an $n_t \times 1$ response vector, $X_t$ is an $n_t \times p$ design matrix, and the total number of observations is $n=\sum_{t=1}^T n_t$.
+
+We assume block independence with a standard Gaussian likelihood and conjugate Normal-Inverse-Gamma priors:
+$$
+\begin{aligned}
+y_t \mid \beta, \sigma^2 &\overset{ind}{\sim} N(X_t\beta, \sigma^2 V_t) \\
+\beta \mid \sigma^2 &\sim N(M_0m_0, \sigma^2M_0) \\
+\sigma^2 &\sim IG(a_0, b_0)\;.
+\end{aligned}
+$$
+
+Letting $\theta = \{\beta,\sigma^2\}$, the full posterior $p(\theta \mid y)$ is proportional to the joint distribution:
+$$
+p(\theta \mid y) \propto IG(\sigma^2 \mid a_0,b_0) \times N(\beta \mid M_0 m_0, \sigma^2 M_0) \times \prod_{t=1}^{T} N(y_t \mid X_t\beta, \sigma^2 V_{t})\;.
+$$
+
+> **Note:** If every single data point is entirely independent, then $V_t = I_{n_t}$. If not, data collection and partitioning should be designed so that observations are independent across the specific blocks.
+
+## Exact Posterior Updates
+
+Because of conjugacy, the posterior distribution at time $t-1$ maintains the exact same Normal-Inverse-Gamma family form:
+$$
+p(\theta \mid y_1,\ldots, y_{t-1}) = IG\left(\sigma^2 \mid a_{t-1}, b_{t-1}\right) \times N\left(\beta \mid M_{t-1}m_{t-1}, \sigma^2 M_{t-1}\right)
+$$
+
+When the $t$-th block of data is processed, the posterior updates analytically to:
+$$
+p(\theta \mid y_1,\ldots, y_{t}) = IG\left(\sigma^2 \mid a_{t}, b_{t}\right) \times N\left(\beta \mid M_{t}m_{t}, \sigma^2 M_{t}\right)
+$$
+
+The sufficient statistics $a_t$, $b_t$, $m_t$, and $M_t$ are updated sequentially using the following algebraic rules:
+$$
+\begin{aligned}
+m_{t} &= m_{t-1} + X_t^{\top}V_t^{-1}y_t \\
+M_t^{-1} &= M_{t-1}^{-1} + X_t^{\top}V_t^{-1}X_t \\
+a_t &= a_{t-1} + \frac{n_t}{2} \\
+b_t &= b_{t-1} + \frac{q_t}{2}
+\end{aligned}
+$$
+where the scale factor $q_t$ for the Inverse-Gamma distribution is defined as:
+$$
+q_t = y_t^{\top}y_t + m_{t-1}^{\top}M_{t-1}m_{t-1} - m_{t}^{\top}M_{t}m_{t}\;.
+$$
+
+## Algorithmic Implementation
+
+To implement this sequentially on Big Data, we rely on a computationally efficient loop. While we can use the direct matrix equations, utilizing Cholesky decompositions ensures greater numerical stability. 
+
+**Algorithm: Exact Posterior Sampling (using linear algebra optimizations)**
+
+1. **Initialize Priors:** 
+   Set $m \gets m_0$, $M^{-1} \gets M_0^{-1}$, $a \gets a_0$, and $b \gets b_0$.
+2. **Initialize Matrices:** 
+   Compute the Cholesky factor $L^{-1} \gets \text{cholesky}(M^{-1})$ and solve for $L = \text{trsolve}(L^{-1}, I_p)$.
+3. **Divide and Conquer Loop:** For each block $t$ in $1$ to $T$:
+   * $q \gets \|y_t\|^2 + \|Lm\|^2$
+   * Update sufficient statistics: $m \gets m + X_t^{\top}V_t^{-1}y_t$ and $M^{-1} \gets M^{-1} + X_t^{\top}V_t^{-1}X_t$
+   * Recompute Cholesky factors: $L^{-1} \gets \text{cholesky}(M^{-1})$ and $L = \text{trsolve}(L^{-1}, I_p)$
+   * Finalize scalar updates: $q \gets q - \|Lm\|^2$
+   * Update shape and scale: $b \gets b + q/2$ and $a \gets a + n_t/2$
+4. **Posterior Sampling:** For $i$ in $1$ to $N$:
+   * Draw variance: $\sigma^2_{(i)} \sim IG(a,b)$
+   * Draw standard normal vector: $z \sim N(0, I_p)$
+   * Compute coefficients: $\beta_{(i)} \gets L^{\top}Lm + \sigma_{(i)}L^{\top}z$
+5. **Return:** $\left\{\beta_{(i)},\sigma^2_{(i)}\right\}_{i=1,\ldots,N}$
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
@@ -94,15 +175,15 @@ kable(summary_T10, digits = 4, caption = "Posterior Summaries (Divide and Conque
 
 ## Section 3: Comparisons
 
-To prove the exactness of the divide and conquer approach, we now process the dataset as a single block (T=1) and compare the samples. Because the updating scheme uses sufficient statistics, the theoretical posterior is mathematically identical. 
+To demonstrate the exactness of the divide and conquer approach, we now process the dataset as a single block (T=1) and compare the samples. Because the updating scheme uses sufficient statistics, the theoretical posterior is mathematically identical.
 
 ```{r exact_comparison}
 # Run Single Block Sampler (T = 1)
 set.seed(123) # Use same seed to demonstrate distributional equivalence
 res_T1 <- rawSamplerDivideAndConquer(
-  X_list = list(X_full), 
-  y_list = list(y_full), 
-  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0, 
+  X_list = list(X_full),
+  y_list = list(y_full),
+  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0,
   N = N_samples
 )
 
@@ -122,15 +203,15 @@ kable(comparison_df, digits = 4, caption = "Posterior Comparison: T=1 vs T=10")
 
 To visually confirm that the resulting distributions are practically indistinguishable, we plot the sorted posterior samples against one another. The 45-degree line represents perfect equality, and R-squared indicates the correlation.
 
-```{r qq_plots, fig.width=10, fig.height=8}
-params_to_plot <- c("Intercept", "X1", "Lat", "sigma2")
+```{r qq_plots, fig.width=12, fig.height=10}
+params_to_plot <- c("Intercept", "X1", "X2", "X3", "X4", "X5", "X6", "Lat", "Longi", "sigma2")
 
 # Vectorized alignment and R-squared calculation
 plot_data_list <- lapply(params_to_plot, function(param) {
   q_T1 <- sort(draws_T1[[param]])
   q_T10 <- sort(draws_T10[[param]])
   r_squared <- cor(q_T1, q_T10)^2
-  
+
   data.frame(
     Facet_Label = paste0(param, " (R-squared = ", round(r_squared, 6), ")"),
     Exact_T1 = q_T1,
@@ -140,10 +221,13 @@ plot_data_list <- lapply(params_to_plot, function(param) {
 
 df_plot_all <- do.call(rbind, plot_data_list)
 
+# Convert Facet_Label to a factor to enforce the specific plotting order
+df_plot_all$Facet_Label <- factor(df_plot_all$Facet_Label, levels = unique(df_plot_all$Facet_Label))
+
 ggplot(df_plot_all, aes(x = Exact_T1, y = Sequential_T10)) +
   geom_point(alpha = 0.3, color = "steelblue") +
   geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", linewidth = 1) +
-  facet_wrap(~ Facet_Label, scales = "free") +
+  facet_wrap(~ Facet_Label, scales = "free", ncol = 3) +
   labs(
     title = "Q-Q Plots: Exact Posterior (T=1) vs Sequential (T=10)",
     x = "Exact Posterior (T = 1)",
@@ -207,7 +291,7 @@ kable(comparison_scaled_df, digits = 4, caption = "Posterior Comparison (Scaled)
 
 To ensure the exact divide and conquer approach holds true for our centered and scaled data, we plot the sorted posterior samples against each other, calculating the R-squared for the exactness of the match.
 
-```{r qq_plots_scaled, fig.width=10, fig.height=8}
+```{r qq_plots_scaled, fig.width=12, fig.height=10}
 # Vectorized alignment and R-squared calculation for scaled data
 plot_data_list_scaled <- lapply(params_to_plot, function(param) {
   q_T1_scaled <- sort(draws_scaled_T1[[param]])
@@ -223,10 +307,13 @@ plot_data_list_scaled <- lapply(params_to_plot, function(param) {
 
 df_plot_all_scaled <- do.call(rbind, plot_data_list_scaled)
 
+# Convert Facet_Label to a factor to enforce the specific plotting order
+df_plot_all_scaled$Facet_Label <- factor(df_plot_all_scaled$Facet_Label, levels = unique(df_plot_all_scaled$Facet_Label))
+
 ggplot(df_plot_all_scaled, aes(x = Exact_T1, y = Sequential_T10)) +
   geom_point(alpha = 0.3, color = "seagreen") +
   geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", linewidth = 1) +
-  facet_wrap(~ Facet_Label, scales = "free") +
+  facet_wrap(~ Facet_Label, scales = "free", ncol = 3) +
   labs(
     title = "Q-Q Plots (Scaled): Exact Posterior (T=1) vs Sequential (T=10)",
     x = "Exact Posterior (Scaled, T = 1)",
@@ -234,3 +321,4 @@ ggplot(df_plot_all_scaled, aes(x = Exact_T1, y = Sequential_T10)) +
   ) +
   theme_bw()
 ```
+

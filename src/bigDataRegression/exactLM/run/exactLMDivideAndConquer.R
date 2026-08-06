@@ -68,9 +68,9 @@ kable(summary_T10, digits = 4, caption = "Posterior Summaries (Divide and Conque
 # Run Single Block Sampler (T = 1)
 set.seed(123) # Use same seed to demonstrate distributional equivalence
 res_T1 <- rawSamplerDivideAndConquer(
-  X_list = list(X_full), 
-  y_list = list(y_full), 
-  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0, 
+  X_list = list(X_full),
+  y_list = list(y_full),
+  M0_inv = M0_inv, m0 = m0, a0 = a0, b0 = b0,
   N = N_samples
 )
 
@@ -86,15 +86,15 @@ comparison_df <- merge(summary_T1, summary_T10, by = "Parameter")
 kable(comparison_df, digits = 4, caption = "Posterior Comparison: T=1 vs T=10")
 
 
-## ----qq_plots, fig.width=10, fig.height=8-------------------------------------
-params_to_plot <- c("Intercept", "X1", "Lat", "sigma2")
+## ----qq_plots, fig.width=12, fig.height=10------------------------------------
+params_to_plot <- c("Intercept", "X1", "X2", "X3", "X4", "X5", "X6", "Lat", "Longi", "sigma2")
 
 # Vectorized alignment and R-squared calculation
 plot_data_list <- lapply(params_to_plot, function(param) {
   q_T1 <- sort(draws_T1[[param]])
   q_T10 <- sort(draws_T10[[param]])
   r_squared <- cor(q_T1, q_T10)^2
-  
+
   data.frame(
     Facet_Label = paste0(param, " (R-squared = ", round(r_squared, 6), ")"),
     Exact_T1 = q_T1,
@@ -104,10 +104,13 @@ plot_data_list <- lapply(params_to_plot, function(param) {
 
 df_plot_all <- do.call(rbind, plot_data_list)
 
+# Convert Facet_Label to a factor to enforce the specific plotting order
+df_plot_all$Facet_Label <- factor(df_plot_all$Facet_Label, levels = unique(df_plot_all$Facet_Label))
+
 ggplot(df_plot_all, aes(x = Exact_T1, y = Sequential_T10)) +
   geom_point(alpha = 0.3, color = "steelblue") +
   geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", linewidth = 1) +
-  facet_wrap(~ Facet_Label, scales = "free") +
+  facet_wrap(~ Facet_Label, scales = "free", ncol = 3) +
   labs(
     title = "Q-Q Plots: Exact Posterior (T=1) vs Sequential (T=10)",
     x = "Exact Posterior (T = 1)",
@@ -163,7 +166,7 @@ comparison_scaled_df <- merge(summary_scaled_T1, summary_scaled_T10, by = "Param
 kable(comparison_scaled_df, digits = 4, caption = "Posterior Comparison (Scaled): T=1 vs T=10")
 
 
-## ----qq_plots_scaled, fig.width=10, fig.height=8------------------------------
+## ----qq_plots_scaled, fig.width=12, fig.height=10-----------------------------
 # Vectorized alignment and R-squared calculation for scaled data
 plot_data_list_scaled <- lapply(params_to_plot, function(param) {
   q_T1_scaled <- sort(draws_scaled_T1[[param]])
@@ -179,10 +182,13 @@ plot_data_list_scaled <- lapply(params_to_plot, function(param) {
 
 df_plot_all_scaled <- do.call(rbind, plot_data_list_scaled)
 
+# Convert Facet_Label to a factor to enforce the specific plotting order
+df_plot_all_scaled$Facet_Label <- factor(df_plot_all_scaled$Facet_Label, levels = unique(df_plot_all_scaled$Facet_Label))
+
 ggplot(df_plot_all_scaled, aes(x = Exact_T1, y = Sequential_T10)) +
   geom_point(alpha = 0.3, color = "seagreen") +
   geom_abline(slope = 1, intercept = 0, color = "darkred", linetype = "dashed", linewidth = 1) +
-  facet_wrap(~ Facet_Label, scales = "free") +
+  facet_wrap(~ Facet_Label, scales = "free", ncol = 3) +
   labs(
     title = "Q-Q Plots (Scaled): Exact Posterior (T=1) vs Sequential (T=10)",
     x = "Exact Posterior (Scaled, T = 1)",
