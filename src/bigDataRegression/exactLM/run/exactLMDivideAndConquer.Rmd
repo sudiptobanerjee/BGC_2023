@@ -99,7 +99,7 @@ To implement this sequentially on Big Data, we rely on a computationally efficie
    * Compute coefficients: $\beta_{(i)} \gets L^{\top}Lm + \sigma_{(i)}L^{\top}z$
 5. **Return:** $\left\{\beta_{(i)},\sigma^2_{(i)}\right\}_{i=1,\ldots,N}$
 
-```{r setup, include=FALSE}
+```{r setup, include=TRUE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(dplyr)
 library(knitr)
