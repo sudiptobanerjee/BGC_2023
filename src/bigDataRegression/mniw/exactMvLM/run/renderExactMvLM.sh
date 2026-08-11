@@ -7,6 +7,7 @@ set -e
 RMD_FILES=(
   "exactMvLM.Rmd"
   "exactMvLMFederated.Rmd"
+  "benchmark.Rmd"
 )
 
 for RMD_FILE in "${RMD_FILES[@]}"; do
