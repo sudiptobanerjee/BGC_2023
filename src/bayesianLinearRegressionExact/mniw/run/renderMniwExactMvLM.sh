@@ -5,10 +5,9 @@ set -e
 
 # List your Rmd files here
 RMD_FILES=(
-  "theoryAndRaw.Rmd"
-  "theoryPredictions.Rmd"
-  "theoryAndRawWithQR.Rmd"
-  "modelComparisons.Rmd"
+  "mniwExactMvLM.Rmd"
+  "mniwPosteriorPredictiveInference.Rmd"
+  "mniwModelComparisons.Rmd"
 )
 
 for RMD_FILE in "${RMD_FILES[@]}"; do

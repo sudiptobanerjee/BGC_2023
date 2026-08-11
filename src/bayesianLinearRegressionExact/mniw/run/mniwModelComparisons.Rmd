@@ -1,0 +1,547 @@
+---
+title: "Analytical WAIC for Matrix-Normal-Inverse-Wishart Models"
+author: "Sudipto Banerjee"
+output: 
+  html_document:
+    number_sections: true
+params:
+  sampler_option: 2 
+---
+
+*Note:* To generate this HTML file, run `renderMniwExactMvLm.sh` in the terminal from the `src/bayesianLinearRegressionExact/mniw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/mniw/run
+./renderMniwExactMvLM.sh
+```
+
+---
+
+# Derivation of the Matrix Hyper-T Posterior Predictive Density
+
+For a new set of predictors $\tilde{X} \in \mathbb{R}^{\tilde{m} \times p}$ with row covariance matrix $\Omega \in \mathbb{R}^{\tilde{m} \times \tilde{m}}$, the likelihood of the predicted response matrix $\tilde{Y} \in \mathbb{R}^{\tilde{m} \times q}$ is given by:
+
+$$p(\tilde{Y} \mid \beta, \Sigma, \tilde{X}) = \mathcal{MN}_{\tilde{m} \times q}(\tilde{Y} \mid \tilde{X}\beta, \Omega, \Sigma)$$
+
+Under the conjugate Matrix-Normal Inverse-Wishart (MNIW) posterior:
+
+$$p(\beta, \Sigma \mid D) = \mathcal{MN}_{p \times q}(\beta \mid M_n m_n, M_n, \Sigma) \times \mathcal{IW}_q(\Sigma \mid \nu_n, \Psi_n)$$
+
+where $D = (Y, X)$ represents the training dataset with $Y \in \mathbb{R}^{n \times q}$ and $X \in \mathbb{R}^{n \times p}$.
+
+## Calculus-Free Derivation via Bayes' Identity
+
+### Framing via Bayes' Identity
+
+By Bayes' theorem, the posterior predictive density satisfies the following relationship for any parameter choice $(\beta, \Sigma)$:
+
+$$p(\tilde{Y} \mid D, \tilde{X}) = \frac{p(\tilde{Y} \mid \beta, \Sigma, \tilde{X}) \, p(\beta, \Sigma \mid D)}{p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X})}$$
+
+The numerator is completely specified from our model setup:
+* **Conditional Likelihood:** $p(\tilde{Y} \mid \beta, \Sigma, \tilde{X}) = \mathcal{MN}_{\tilde{m} \times q}(\tilde{Y} \mid \tilde{X}\beta, \Omega, \Sigma)$
+* **Training Posterior:** $p(\beta, \Sigma \mid D) = \mathcal{MN}_{p \times q}(\beta \mid M_n m_n, M_n, \Sigma) \times \mathcal{IW}_q(\Sigma \mid \nu_n, \Psi_n)$
+
+Because the numerator is known, evaluating $p(\tilde{Y} \mid D, \tilde{X})$ reduces to deriving the explicit form of the denominator $p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X})$ as an augmented MNIW density and simplifying the resulting matrix determinants.
+
+---
+
+### Deriving the Denominator (Augmented MNIW Posterior)
+
+To derive the explicit form of $p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X})$, we treat the training posterior $p(\beta, \Sigma \mid D)$ as a prior distribution and update it with the new target observation likelihood $p(\tilde{Y} \mid \beta, \Sigma, \tilde{X})$.
+
+#### Step 1: The Augmented Linear Model Setup
+
+The new target observations follow the matrix linear regression model:
+
+$$\tilde{Y} = \tilde{X}\beta + \tilde{E}, \quad \tilde{E} \sim \mathcal{MN}_{\tilde{m} \times q}(0, \Omega, \Sigma)$$
+
+Combining the target observation likelihood with our existing training posterior yields:
+
+$$p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X}) \propto p(\tilde{Y} \mid \beta, \Sigma, \tilde{X}) \, p(\beta, \Sigma \mid D)$$
+
+Substituting the Matrix-Normal and Inverse-Wishart densities:
+
+$$
+\begin{aligned}
+p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X}) &\propto |\Omega|^{-\frac{q}{2}} |\Sigma|^{-\frac{\tilde{m}}{2}} \exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (\tilde{Y} - \tilde{X}\beta)^\top \Omega^{-1} (\tilde{Y} - \tilde{X}\beta) \right] \right) \\
+&\quad \times |M_n|^{-\frac{q}{2}} |\Sigma|^{-\frac{p}{2}} \exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n) \right] \right) \\
+&\quad \times |\Psi_n|^{\frac{\nu_n}{2}} |\Sigma|^{-\frac{\nu_n + q + 1}{2}} \exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi_n \right] \right)
+\end{aligned}
+$$
+
+Grouping powers of $|\Sigma|$ and combining all quadratic terms inside the trace function gives:
+
+$$p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X}) \propto |\Sigma|^{-\frac{(\nu_n + \tilde{m}) + p + q + 1}{2}} \exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} Q(\beta) \right] \right)$$
+
+where the total quadratic matrix $Q(\beta)$ is:
+
+$$Q(\beta) = (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n) + (\tilde{Y} - \tilde{X}\beta)^\top \Omega^{-1} (\tilde{Y} - \tilde{X}\beta) + \Psi_n$$
+
+---
+
+#### Step 2: Completing the Square in $\beta$
+
+To put $Q(\beta)$ into a recognizable Matrix-Normal quadratic form, we expand the terms containing $\beta$:
+
+$$
+\begin{aligned}
+Q(\beta) &= \beta^\top M_n^{-1} \beta - \beta^\top m_n - m_n^\top \beta + m_n^\top M_n m_n \\
+&\quad + \beta^\top \tilde{X}^\top \Omega^{-1} \tilde{X} \beta - \beta^\top \tilde{X}^\top \Omega^{-1} \tilde{Y} - \tilde{Y}^\top \Omega^{-1} \tilde{X} \beta + \tilde{Y}^\top \Omega^{-1} \tilde{Y} + \Psi_n
+\end{aligned}
+$$
+
+Grouping the quadratic ($\beta^\top \cdot \beta$) and linear ($\beta^\top \cdot$) terms:
+
+$$Q(\beta) = \beta^\top \underbrace{\left( M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X} \right)}_{M_n^{*-1}} \beta - \beta^\top \underbrace{\left( m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y} \right)}_{m_n^*} - \underbrace{\left( m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y} \right)^\top}_{(m_n^*)^\top} \beta + C$$
+
+where $C = m_n^\top M_n m_n + \tilde{Y}^\top \Omega^{-1} \tilde{Y} + \Psi_n$ collects all terms independent of $\beta$.
+
+Completing the square with respect to $M_n^{*-1}$ and $m_n^*$:
+
+$$Q(\beta) = (\beta - M_n^* m_n^*)^\top M_n^{*-1} (\beta - M_n^* m_n^*) + \Psi_n^*$$
+
+where the updated precision and unscaled mean parameters are:
+
+$$
+\begin{aligned}
+M_n^{*-1} &= M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X} \\
+m_n^* &= m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y}
+\end{aligned}
+$$
+
+---
+
+#### Step 3: Simplifying the Updated Scale Matrix $\Psi_n^*$
+
+The leftover term $\Psi_n^*$ collects all residual quadratic terms:
+
+$$\Psi_n^* = \Psi_n + m_n^\top M_n m_n + \tilde{Y}^\top \Omega^{-1} \tilde{Y} - (m_n^*)^\top M_n^* m_n^*$$
+
+Substituting $m_n^* = m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y}$ and $M_n^* = (M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X})^{-1}$:
+
+$$\Psi_n^* = \Psi_n + \tilde{Y}^\top \Omega^{-1} \tilde{Y} + m_n^\top M_n m_n - (m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y})^\top (M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X})^{-1} (m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y})$$
+
+Applying the Woodbury matrix identity to $(M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X})^{-1}$:
+
+$$(M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X})^{-1} = M_n - M_n \tilde{X}^\top (\Omega + \tilde{X} M_n \tilde{X}^\top)^{-1} \tilde{X} M_n$$
+
+Expanding and cancelling cross-terms yields the predictive residual form:
+
+$$\Psi_n^* = \Psi_n + (\tilde{Y} - \tilde{X} M_n m_n)^\top (\Omega + \tilde{X} M_n \tilde{X}^\top)^{-1} (\tilde{Y} - \tilde{X} M_n m_n)$$
+
+---
+
+#### Step 4: Summary of Denominator Parameters
+
+The augmented posterior $p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X})$ is an MNIW distribution:
+
+$$p(\beta, \Sigma \mid D, \tilde{Y}, \tilde{X}) = \mathcal{MN}_{p \times q}(\beta \mid M_n^* m_n^*, M_n^*, \Sigma) \times \mathcal{IW}_q(\Sigma \mid \nu_n^*, \Psi_n^*)$$
+
+with augmented parameters:
+
+$$
+\begin{aligned}
+M_n^{*-1} &= M_n^{-1} + \tilde{X}^\top \Omega^{-1} \tilde{X} \\
+m_n^* &= m_n + \tilde{X}^\top \Omega^{-1} \tilde{Y} \\
+\nu_n^* &= \nu_n + \tilde{m} \\
+\Psi_n^* &= \Psi_n + (\tilde{Y} - \tilde{X} M_n m_n)^\top (\Omega + \tilde{X} M_n \tilde{X}^\top)^{-1} (\tilde{Y} - \tilde{X} M_n m_n)
+\end{aligned}
+$$
+
+---
+
+### Ratio Evaluation and Term Cancellations
+
+Because Bayes' identity holds for any valid parameters $(\beta, \Sigma)$, we evaluate the density ratio at the augmented posterior mean $\beta = M_n^* m_n^*$. The quadratic parameter term $(\beta - M_n^* m_n^*)$ vanishes to zero.
+
+---
+
+#### Step 1: The Full Ratio with Visual Cancellations
+
+Substituting the full probability densities into Bayes' identity at $\beta = M_n^* m_n^*$ gives:
+
+$$
+\require{cancel}
+p(\tilde{Y} \mid D, \tilde{X}) = \frac{
+  \overbrace{\left( (2\pi)^{-\frac{\tilde{m}q}{2}} |\Omega|^{-\frac{q}{2}} |\Sigma|^{-\frac{\tilde{m}}{2}} \right)}^{\text{Likelihood Norm.}} 
+  \overbrace{\left( \cancel{(2\pi)^{-\frac{pq}{2}}} |M_n|^{-\frac{q}{2}} \cancel{|\Sigma|^{-\frac{p}{2}}} \cdot \frac{|\Psi_n|^{\frac{\nu_n}{2}}}{\cancel{2^{\frac{\nu_n q}{2}}} \Gamma_q\left(\frac{\nu_n}{2}\right)} \cancel{|\Sigma|^{-\frac{\nu_n + q + 1}{2}}} \right)}^{\text{Training Posterior Norm.}} 
+  \overbrace{\cancel{\exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi_n^* \right] \right)}}^{\text{Combined Exponential Kernel}}
+}{
+  \underbrace{\left( \cancel{(2\pi)^{-\frac{pq}{2}}} |M_n^*|^{-\frac{q}{2}} \cancel{|\Sigma|^{-\frac{p}{2}}} \right)}_{\text{Augmented Matrix-Normal Norm.}} 
+  \underbrace{\left( \frac{|\Psi_n^*|^{\frac{\nu_n + \tilde{m}}{2}}}{\cancel{2^{\frac{\nu_n q}{2}}} 2^{\frac{\tilde{m}q}{2}} \Gamma_q\left(\frac{\nu_n + \tilde{m}}{2}\right)} \cancel{|\Sigma|^{-\frac{\nu_n + \tilde{m} + p + q + 1}{2}}} \right)}_{\text{Augmented Inverse-Wishart Norm.}} 
+  \underbrace{\cancel{\exp\left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi_n^* \right] \right)}}_{\text{Augmented Exponential Kernel}}
+}
+$$
+
+---
+
+#### Step 2: Why Terms Cancel Out
+
+1. **Exponential Kernel Cancellation:** Exponents in numerator and denominator match identically and cancel completely.
+2. **Parameter $\Sigma$ Power Cancellation:** Exponents of $|\Sigma|$ in both numerator and denominator equal $-\frac{\nu_n + \tilde{m} + p + q + 1}{2}$, dropping $\Sigma$ out entirely.
+3. **Constant Scalar Simplification:**
+   $$\frac{(2\pi)^{-\frac{\tilde{m}q}{2}}}{2^{-\frac{\tilde{m}q}{2}}} \cdot \frac{\Gamma_q\left(\frac{\nu_n + \tilde{m}}{2}\right)}{\Gamma_q\left(\frac{\nu_n}{2}\right)} = \frac{\Gamma_q\left(\frac{\nu_n + \tilde{m}}{2}\right)}{\Gamma_q\left(\frac{\nu_n}{2}\right) \pi^{\tilde{m}q/2}}$$
+
+---
+
+#### Step 3: Row Scale Determinant Simplification & Determinant Identities
+
+The determinant ratio simplifies as:
+
+$$\frac{|M_n^*|^{\frac{q}{2}}}{|M_n|^{\frac{q}{2}} |\Omega|^{\frac{q}{2}}} = \left( \frac{|M_n^*|}{|M_n| |\Omega|} \right)^{\frac{q}{2}} = \left( \frac{1}{\left| I_p + M_n \tilde{X}^\top \Omega^{-1} \tilde{X} \right| \cdot |\Omega|} \right)^{\frac{q}{2}}$$
+
+Applying **Sylvester's Determinant Identity** ($|I_p + AB| = |I_{\tilde{m}} + BA|$):
+
+$$\left| I_p + M_n \tilde{X}^\top \Omega^{-1} \tilde{X} \right| = \left| I_{\tilde{m}} + \Omega^{-1} \tilde{X} M_n \tilde{X}^\top \right| = |\Omega|^{-1} \left| \Omega + \tilde{X} M_n \tilde{X}^\top \right|$$
+
+Yielding:
+
+$$\frac{|M_n^*|^{\frac{q}{2}}}{|M_n|^{\frac{q}{2}} |\Omega|^{\frac{q}{2}}} = \left| \Omega + \tilde{X} M_n \tilde{X}^\top \right|^{-\frac{q}{2}}$$
+
+#### Final Density Function
+
+Combining all terms yields the exact posterior predictive density:
+
+$$p(\tilde{Y} \mid D, \tilde{X}) = \frac{\Gamma_q\left(\frac{\nu_n + \tilde{m}}{2}\right)}{\Gamma_q\left(\frac{\nu_n}{2}\right) \pi^{\tilde{m} q/2}} \left|\Omega + \tilde{X} M_n \tilde{X}^\top\right|^{-q/2} |\Psi_n|^{-\tilde{m}/2} \left| I_q + \Psi_n^{-1} (\tilde{Y} - \tilde{X} M_n m_n)^\top (\Omega + \tilde{X} M_n \tilde{X}^\top)^{-1} (\tilde{Y} - \tilde{X} M_n m_n) \right|^{-\frac{\nu_n + \tilde{m}}{2}}$$
+
+This defines the matrix-variate predictive density $\mathcal{MT}_{\tilde{m} \times q}\left(\tilde{X} M_n m_n, \; \Omega + \tilde{X} M_n \tilde{X}^\top, \; \Psi_n, \; \nu_n\right)$.
+
+---
+
+## Single Observation Specialization: Vector Hyper-T Distribution
+
+When $\tilde{m} = 1$, setting $\tilde{X} = x_i^\top$ and $\Omega = 1$, the response matrix reduces to a single observation vector $y_i^\top$. Let $c_i = 1 + x_i^\top M_n x_i$.
+
+The matrix density kernel simplifies to a $q$-variate Student-t form:
+
+$$p(y_i^\top \mid D) = \frac{\Gamma_q\left(\frac{\nu_n + 1}{2}\right)}{\Gamma_q\left(\frac{\nu_n}{2}\right) \pi^{q/2}} |c_i \Psi_n|^{-1/2} \left[ 1 + (y_i^\top - x_i^\top M_n m_n) (c_i \Psi_n)^{-1} (y_i^\top - x_i^\top M_n m_n)^\top \right]^{-\frac{\nu_n + 1}{2}}$$
+
+Re-parameterizing with effective degrees of freedom $\delta = \nu_n - q + 1$, location vector $\mu_i = x_i^\top M_n m_n$, and scale matrix $\Sigma_i = \frac{c_i}{\nu_n - q + 1} \Psi_n$, we obtain the exact vector marginal posterior predictive distribution:
+
+$$y_i^\top \mid D \sim \text{hyper-T}_{\nu_n - q + 1}\left(x_i^\top M_n m_n, \; \frac{c_i}{\nu_n - q + 1} \Psi_n\right)$$
+
+---
+
+# Analytical Derivation of WAIC Metrics
+
+Evaluating the Watanabe-Akaike Information Criterion (WAIC) analytically requires closed-form expressions for both the log pointwise predictive density ($lppd$) and the effective number of parameters ($p_{WAIC}$).
+
+## Analytical Derivation of LPPD
+
+Using the probability density function of the single-observation vector hyper-T posterior predictive distribution, the total $lppd$ summed over all $n$ observations is given by:
+
+$$lppd = \sum_{i=1}^n \left[ \log \Gamma\left(\frac{\nu_n + 1}{2}\right) - \log \Gamma\left(\frac{\nu_n - q + 1}{2}\right) - \frac{q}{2}\log(\pi) - \frac{1}{2}\log\vert{}c_i \Psi_n\vert{} - \frac{\nu_n+1}{2} \log\left(1 + \frac{1}{c_i} (y_i^\top - x_i^\top M_n m_n) \Psi_n^{-1} (y_i^\top - x_i^\top M_n m_n)^\top \right) \right]$$
+
+---
+
+## Analytical Derivation of $p_{WAIC}$
+
+The WAIC penalty term, $p_{WAIC}$, is defined as the sum of the posterior variances of the pointwise log-likelihoods:
+
+$$p_{WAIC} = \sum_{i=1}^n \text{Var}_{\beta, \Sigma \mid D}(\log p(y_i^\top \mid \beta, \Sigma))$$
+
+The log-likelihood for a single multivariate normal observation is:
+
+$$\log p(y_i^\top \mid \beta, \Sigma) = -\frac{q}{2}\log(2\pi) - \frac{1}{2}\log\vert{}\Sigma\vert{} - \frac{1}{2} (y_i^\top - x_i^\top\beta)\Sigma^{-1}(y_i^\top - x_i^\top\beta)^\top$$
+
+Dropping the constant term, we define $A = \log\vert{}\Sigma\vert{}$ and $B_i = (y_i^\top - x_i^\top\beta)\Sigma^{-1}(y_i^\top - x_i^\top\beta)^\top$. The variance of the log-likelihood is then:
+
+$$\text{Var}(\log p(y_i^\top \mid \beta, \Sigma)) = \frac{1}{4} \left[ \text{Var}(A) + \text{Var}(B_i) + 2\text{Cov}(A, B_i) \right]$$
+
+To evaluate these components completely analytically without Monte Carlo approximations, we define three quantities derived from the data and the $\text{MNIW}$ posterior parameters:
+
+* **Predictive Variance Scalar:** $h_i = x_i^\top M_n x_i$
+* **Residual Row Vector:** $\hat{e}_i^\top = y_i^\top - x_i^\top M_n m_n$
+* **Mahalanobis Distance:** $d_i = \hat{e}_i^\top \Psi_n^{-1} \hat{e}_i$
+
+By applying the law of total variance and marginalizing over the Inverse-Wishart distribution of $\Sigma$, the complex 4th-order polynomial expectations collapse into simple closed-form scalars:
+
+* **Variance of Log-Determinant:** $\text{Var}(A) = \sum_{j=1}^q \psi_1\left(\frac{\nu_n - j + 1}{2}\right)$, where $\psi_1(z) = \frac{d^2}{dz^2} \log \Gamma(z)$ is the trigamma function (evaluated via `trigamma()` in R).
+* **Variance of Quadratic Form:** $\text{Var}(B_i) = 2 h_i^2 q + 4 h_i \nu_n d_i + 2 \nu_n d_i^2$
+* **Covariance:** $\text{Cov}(A, B_i) = -2 d_i$
+
+Substituting these terms back into the original variance equation yields the exact analytical penalty:
+
+$$p_{WAIC} = \frac{1}{4} \sum_{i=1}^n \left[ \text{Var}(A) + 2 h_i^2 q + 4 h_i \nu_n d_i + 2 \nu_n d_i^2 - 4 d_i \right]$$
+
+---
+
+# Data Processing and Analytical WAIC Computation
+
+In this section, we ingest our data files, specify the standard conjugate baseline priors, and explicitly derive the analytical posterior parameters. We optimize the parameter derivation by strictly solving the linear systems via Cholesky triangular factors (`backsolve` with `transpose = TRUE`), avoiding computationally expensive structural matrix inversions.
+
+```{r analytical_waic, warning=FALSE, message=FALSE}
+# Source the optimized WAIC function
+source("../src/mniwModelComparisons.r")
+
+# 1. Ingest the Data
+Y <- as.matrix(read.table("../data/Y.txt", header = FALSE))
+X_raw <- as.matrix(read.table("../data/X.txt", header = FALSE))
+
+# Prepend intercept to design matrix
+X <- cbind(1, X_raw)
+
+# Extract dimensions
+n_obs <- nrow(Y)
+q_cols <- ncol(Y)
+p_cols <- ncol(X)
+
+# 2. Specify Conjugate Priors
+M0_inv <- diag(1, p_cols)
+m0 <- matrix(0, nrow = p_cols, ncol = q_cols)
+nu0 <- q_cols + 2
+Psi0 <- diag(1, q_cols)
+
+# 3. Compute Posterior Parameters (Optimized Cholesky Solvers)
+Mn_inv <- M0_inv + crossprod(X)
+U_Mn_inv <- chol(Mn_inv)
+
+mn_unscaled <- M0_inv %*% m0 + crossprod(X, Y)
+
+tmp_mn <- backsolve(U_Mn_inv, mn_unscaled, transpose = TRUE)
+mn <- backsolve(U_Mn_inv, tmp_mn)
+
+nu_n <- nu0 + n_obs
+
+Psi_n <- Psi0 + crossprod(Y) + crossprod(m0, M0_inv %*% m0) - crossprod(tmp_mn)
+
+U_Mn_inv_inv <- backsolve(U_Mn_inv, diag(p_cols))
+Mn <- tcrossprod(U_Mn_inv_inv)
+
+# 4. Execute the analytical WAIC calculation
+waic_analytical <- compute_analytical_waic(Y, X, Mn, mn, Psi_n, nu_n)
+```
+
+---
+
+# Sample-Based Posterior Predictive Evaluation
+
+While evaluating WAIC analytically is fast and exact, standard Bayesian models often require Monte Carlo sampling. To compute the sample-based WAIC, we draw $S$ samples from the posterior:
+$$(\beta^{(s)}, \Sigma^{(s)}) \sim \text{MNIW}(M_n m_n, M_n, \Psi_n, \nu_n) \quad \text{for } s = 1, \dots, S$$
+
+For each observation $i$ and each sample $s$, we compute the pointwise log-likelihoods and aggregate $lppd$ and $p_{WAIC}$.
+
+```{r sample_based_waic, warning=FALSE, message=FALSE}
+# Load required package and source external sampling scripts
+library(mniw)
+source("../src/mniwPosteriorPredictive.r")
+
+# Set seed for reproducibility
+set.seed(42)
+S_samples <- 5000
+
+# Select sampling method based on parameter option
+if (params$sampler_option == 1) {
+  cat("Evaluating using Option #1 (mniw package)\n")
+  samples <- draw_mniw_samples_pkg(S = S_samples, mn = mn, Mn_inv = Mn_inv, Psi_n = Psi_n, nu_n = nu_n)
+} else if (params$sampler_option == 2) {
+  cat("Evaluating using Option #2 (Custom Exact Sampler)\n")
+  samples <- draw_mniw_samples_custom(S = S_samples, mn = mn, Mn = Mn, Psi_n = Psi_n, nu_n = nu_n)
+} else {
+  stop("Invalid sampler_option. Please choose either 1 or 2.")
+}
+
+# Compute WAIC using custom sampling function
+waic_sample <- compute_sample_waic(Y, X, samples$X, samples$Sigma)
+```
+
+---
+
+# WAIC Computation via the `loo` Package
+
+To validate our results against R's standard Bayesian diagnostics library, we compute WAIC using the `loo` package. We first generate the $S \times N$ matrix of pointwise log-likelihoods and pass it directly to `loo::waic()`.
+
+```{r loo_waic, warning=FALSE, message=FALSE}
+library(loo)
+
+# 1. Build the S x N pointwise log-likelihood matrix across posterior draws
+log_lik_mat <- do.call(rbind, lapply(seq_len(S_samples), function(s) {
+  beta_s <- samples$X[,,s]
+  sigma_s <- samples$Sigma[,,s]
+  
+  inv_sigma_s <- solve(sigma_s)
+  log_det_s <- as.numeric(determinant(sigma_s, logarithm = TRUE)$modulus)
+  
+  diff <- Y - X %*% beta_s
+  quad_form <- rowSums((diff %*% inv_sigma_s) * diff)
+  
+  -0.5 * q_cols * log(2 * pi) - 0.5 * log_det_s - 0.5 * quad_form
+}))
+
+# 2. Evaluate WAIC using loo::waic()
+loo_obj <- loo::waic(log_lik_mat)
+
+# Extract elpd, p_waic, and calculate corresponding lppd
+waic_loo <- list(
+  WAIC = loo_obj$estimates["waic", "Estimate"],
+  lppd = loo_obj$estimates["elpd_waic", "Estimate"] + loo_obj$estimates["p_waic", "Estimate"],
+  p_waic = loo_obj$estimates["p_waic", "Estimate"]
+)
+```
+
+---
+
+# Comparison of Results
+
+We conclude by comparing $lppd$, $p_{WAIC}$, and total $WAIC$ across all three computation methods: Exact Analytical, Custom Sample-Based, and the `loo` Package.
+
+```{r comparison_summary, warning=FALSE, message=FALSE}
+library(knitr)
+
+# -----------------------------------------------------------------------------
+# Print Comparative Performance Summary
+# -----------------------------------------------------------------------------
+comparison_df <- data.frame(
+  Metric = c("lppd (Log Predictive Density)", "p_WAIC (Effective Parameters)", "WAIC (Deviance Scale)"),
+  `Exact_Analytical` = c(waic_analytical$lppd, waic_analytical$p_waic, waic_analytical$WAIC),
+  `Custom_Sampled`   = c(waic_sample$lppd, waic_sample$p_waic, waic_sample$WAIC),
+  `LOO_Package`      = c(waic_loo$lppd, waic_loo$p_waic, waic_loo$WAIC),
+  `Abs_Diff_(Exact_vs_Sample)` = c(
+    abs(waic_analytical$lppd - waic_sample$lppd),
+    abs(waic_analytical$p_waic - waic_sample$p_waic),
+    abs(waic_analytical$WAIC - waic_sample$WAIC)
+  ),
+  check.names = FALSE
+)
+
+# Display styled summary table
+kable(
+  comparison_df, 
+  digits = 4,
+  col.names = c("Metric", "Exact Analytical", "Custom Sampled", "LOO Package", "Abs Diff (Exact vs Sample)"),
+  caption = "Comparative WAIC Metrics across Evaluation Methods"
+)
+```
+
+---
+
+# Sequential Covariate Expansion and WAIC Analysis
+
+This section evaluates how model metrics evolve as covariates are added sequentially to design matrix $X^{(k)} = X[, 1:k]$. Posterior updating and model evaluation rely entirely on Cholesky factorizations (`chol`, `backsolve`, `crossprod`, `tcrossprod`) and functional mapping (`lapply`), avoiding `solve()`, `t()`, and `for` loops.
+
+```{r waic-sequential-eval, message=FALSE, warning=FALSE, fig.width=10, fig.height=7}
+library(ggplot2)
+library(tidyr)
+library(knitr)
+
+# Source the analytical WAIC computation script
+source("../src/mniwModelComparisons.r")
+
+# Extract matrix dimensions
+n_obs  <- nrow(Y)
+q_cols <- ncol(Y)
+p_cols <- ncol(X)
+
+# Assign standard prior matrices if not present in active environment
+M0_inv <- if (exists("M0_inv")) M0_inv else diag(1, p_cols)
+m0     <- if (exists("m0")) m0 else matrix(0, nrow = p_cols, ncol = q_cols)
+nu0    <- if (exists("nu0")) nu0 else q_cols + 2
+Psi0   <- if (exists("Psi0")) Psi0 else diag(1, q_cols)
+
+# Sequentially evaluate models via lapply without solve(), t(), or for loops
+waic_seq_results <- do.call(rbind, lapply(1:p_cols, function(k) {
+  # Sub-matrices for column subset k
+  X_k      <- X[, 1:k, drop = FALSE]
+  M0_inv_k <- M0_inv[1:k, 1:k, drop = FALSE]
+  m0_k     <- m0[1:k, , drop = FALSE]
+  
+  # Posterior parameters derived using Cholesky solvers (no solve, no t)
+  Mn_inv_k   <- M0_inv_k + crossprod(X_k)
+  U_Mn_inv_k <- chol(Mn_inv_k)
+  
+  mn_unscaled_k <- M0_inv_k %*% m0_k + crossprod(X_k, Y)
+  tmp_mn_k      <- backsolve(U_Mn_inv_k, mn_unscaled_k, transpose = TRUE)
+  mn_k          <- backsolve(U_Mn_inv_k, tmp_mn_k)
+  
+  nu_n_k  <- nu0 + n_obs
+  Psi_n_k <- Psi0 + crossprod(Y) + crossprod(m0_k, M0_inv_k %*% m0_k) - crossprod(tmp_mn_k)
+  
+  U_Mn_inv_inv_k <- backsolve(U_Mn_inv_k, diag(k))
+  Mn_k           <- tcrossprod(U_Mn_inv_inv_k)
+  
+  # Evaluate analytical WAIC directly using compute_analytical_waic
+  waic_k <- compute_analytical_waic(
+    Y     = Y, 
+    X     = X_k, 
+    Mn    = Mn_k, 
+    mn    = mn_k, 
+    Psi_n = Psi_n_k, 
+    nu_n  = nu_n_k
+  )
+  
+  # Model sequence label: M0 (Intercept), M1 (+X1), M2 (+X2), ...
+  model_label <- if (k == 1) "M0 (Intercept)" else paste0("M", k - 1, " (+X", k - 1, ")")
+  
+  data.frame(
+    k          = k,
+    Model      = model_label,
+    lppd       = waic_k$lppd,
+    p_waic     = waic_k$p_waic,
+    waic       = waic_k$WAIC,
+    stringsAsFactors = FALSE
+  )
+}))
+
+# Display summary comparison table
+kable(
+  waic_seq_results[, c("Model", "lppd", "p_waic", "waic")], 
+  digits = 3,
+  col.names = c("Model Sequence", "lppd", "p_WAIC", "WAIC"),
+  caption = "MNIW Model Criteria vs. Number of Included Covariates"
+)
+
+# Reshape data and format factors for stacked panel display
+waic_long <- pivot_longer(
+  waic_seq_results, 
+  cols = c("waic", "lppd", "p_waic"), 
+  names_to = "Metric", 
+  values_to = "Value"
+)
+
+# Set factor ordering for x-axis models
+waic_long$Model <- factor(waic_long$Model, levels = waic_seq_results$Model)
+
+# Set factor ordering and labels for stacked panels
+waic_long$Metric_Label <- factor(
+  waic_long$Metric,
+  levels = c("waic", "lppd", "p_waic"),
+  labels = c("WAIC (Lower is Better)", "lppd (Higher Fit is Better)", "p_WAIC (Penalty)")
+)
+
+# Match exact color palette from NIG profile
+metric_colors <- c(
+  "WAIC (Lower is Better)"     = "#c85200",
+  "lppd (Higher Fit is Better)" = "#2b5c8f",
+  "p_WAIC (Penalty)"           = "#7570b3"
+)
+
+# Generate stacked profile plot
+ggplot(waic_long, aes(x = Model, y = Value, color = Metric_Label, group = Metric_Label)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  facet_wrap(~ Metric_Label, ncol = 1, scales = "free_y") +
+  scale_color_manual(values = metric_colors) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "grey30", size = 11, margin = margin(b = 10)),
+    strip.text = element_text(face = "bold", size = 11),
+    axis.text.x = element_text(angle = 30, hjust = 1, color = "black"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey92")
+  ) +
+  labs(
+    title = "Sequential Model Comparison Profile",
+    subtitle = "Tracking Model Fit (lppd), Complexity Penalty (p_WAIC), and Overall Criterion (WAIC)",
+    x = "Model Sequence",
+    y = "Model Value"
+  )
+```
+
+## Metric Interpretations
+
+* **In-Sample Fit ($\text{lppd}$)**: Measures total log pointwise predictive density. It monotonically increases or plateaus as covariates are added ($k \to p$), reflecting the model's expanding capacity to fit training observations $Y$.
+* **Complexity Penalty ($p_{\text{WAIC}}$)**: Represents the effective number of parameters by calculating the pointwise posterior variance of the log-likelihoods. It grows strictly as more columns enter $X$, scaling up the model complexity penalty.
+* **Optimal Model Threshold ($\text{WAIC}$)**: Combines fit and penalty via $\text{WAIC} = -2(\text{lppd} - p_{\text{WAIC}})$. The model index $k^*$ that minimizes this overall criterion identifies the optimal covariate subset, successfully balancing predictive accuracy against overparameterization.

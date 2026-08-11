@@ -1,0 +1,841 @@
+---
+title: "Tutorial: Exact Bayesian Inference for Matrix-Normal-Inverse-Wishart Multivariate Regression"
+author: "Sudipto Banerjee"
+output: 
+  html_document:
+    number_sections: true
+---
+
+*Note:* To generate this HTML file, run `renderMniwExactMvLm.sh` in the terminal from the `src/bayesianLinearRegressionExact/mniw/run` directory. Alternatively, find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bayesianLinearRegressionExact/mniw/run
+./renderMniwExactMvLM.sh
+```
+
+---
+
+# Distribution Theory Foundations
+
+This tutorial establishes the foundational distribution theory for conjugate matrix-variate Bayesian linear regression models. We evaluate an $n \times q$ matrix of observations $Y$ using an $n \times p$ design matrix $X$. 
+
+For the scope of this tutorial and exact analytical updating, the $n \times n$ row-covariance matrix $V$ is assumed to be fixed. This matrix can be specified through a known spatial kernel or set to an identity matrix to represent row-wise independence.
+
+## Matrix-Normal Distribution
+A random matrix $Y_{n \times q}$ follows a Matrix-Normal distribution $\text{MN}_{n,q}(M, V, U)$ if its probability density function is given by the following expression:
+
+$$p(Y \mid M, V, U) = \frac{\exp \left( -\frac{1}{2} \text{tr}\left[ U^{-1}(Y - M)^\top V^{-1}(Y - M) \right] \right)}{(2\pi)^{\frac{nq}{2}} |U|^{\frac{n}{2}} |V|^{\frac{q}{2}}}$$
+
+Here, $M$ represents the $n \times q$ location or mean matrix. The matrix $V$ denotes the $n \times n$ fixed row-covariance matrix. Lastly, $U$ signifies the $q \times q$ column-covariance matrix.
+
+## Inverse-Wishart Distribution
+A $q \times q$ positive-definite matrix $\Sigma$ follows an Inverse-Wishart distribution $\text{IW}(\Psi, \nu)$ with scale matrix $\Psi$ and degrees of freedom $\nu$ if its density function is expressed as follows:
+
+$$p(\Sigma \mid \Psi, \nu) = \frac{|\Psi|^{\frac{\nu}{2}}}{2^{\frac{\nu q}{2}} \Gamma_q\left(\frac{\nu}{2}\right)} |\Sigma|^{-\frac{\nu + q + 1}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi \right] \right)$$
+
+In this definition, $\Psi$ is a $q \times q$ positive-definite matrix, and $\Gamma_q(\cdot)$ represents the multivariate gamma function.
+
+---
+
+# Model Specification
+
+We consider the matrix-variate linear regression framework where the errors exhibit structural matrix dependencies:
+
+$$Y = X\beta + E_Y, \quad E_Y \sim \text{MN}_{n,q}(O, V, \Sigma)$$
+
+In this model, $\beta$ is a $p \times q$ matrix containing the structural regression coefficients, and $V$ represents our fixed row-covariance framework.
+
+## Conjugate Matrix-Normal-Inverse-Wishart (MNIW) Prior
+To evaluate the posterior parameters analytically, we assign a joint $\text{MNIW}(M_0 m_0, M_0, \Psi_0, \nu_0)$ prior distribution over the parameters $\{\beta, \Sigma\}$. Here, $M_0$ serves as a $p \times p$ row-covariance structure for the coefficients, and $m_0$ is a $p \times q$ location anchor matrix:
+
+$$\Sigma \sim \text{IW}(\Psi_0, \nu_0)$$
+
+$$\beta \mid \Sigma \sim \text{MN}_{p,q}(M_0 m_0, M_0, \Sigma)$$
+
+This formulation yields the full joint prior density function:
+
+$$p(\beta, \Sigma) \propto |\Sigma|^{-\frac{\nu_0 + q + 1}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi_0 \right] \right) \cdot |M_0|^{-\frac{q}{2}} |\Sigma|^{-\frac{p}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (\beta - M_0 m_0)^\top M_0^{-1} (\beta - M_0 m_0) \right] \right)$$
+
+Combining terms allows us to express the joint prior structure compactly:
+
+$$p(\beta, \Sigma) \propto |\Sigma|^{-\frac{\nu_0 + p + q + 1}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \left( \Psi_0 + (\beta - M_0 m_0)^\top M_0^{-1} (\beta - M_0 m_0) \right) \right] \right)$$
+
+---
+
+# Derivation of the Joint Posterior
+
+Given that the row-scale matrix $V$ is entirely fixed, the likelihood matrix density function matches the following expression:
+
+$$p(Y \mid X, \beta, \Sigma) \propto |\Sigma|^{-\frac{n}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (Y - X\beta)^\top V^{-1} (Y - X\beta) \right] \right)$$
+
+Invoking Bayes' theorem, the analytical joint posterior distribution behaves as $p(\beta, \Sigma \mid D) \propto p(Y \mid X, \beta, \Sigma) \times p(\beta, \Sigma)$:
+
+$$p(\beta, \Sigma \mid D) \propto |\Sigma|^{-\frac{\nu_0 + n + p + q + 1}{2}} \exp \left( -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \left( \Psi_0 + (\beta - M_0 m_0)^\top M_0^{-1} (\beta - M_0 m_0) + (Y - X\beta)^\top V^{-1} (Y - X\beta) \right) \right] \right)$$
+
+## Algebraic Completion of the Square
+
+To uncover the structural update parameters, we expand the matrix quadratic blocks nested inside the trace operator. Unlike scalar algebra where cross-terms combine into a simple $-2ab$, matrix quadratics generate paired transpose terms. 
+
+First, we expand the terms depending on $\beta$ from both the prior and the likelihood:
+
+$$ \beta^\top M_0^{-1} \beta - \beta^\top m_0 - m_0^\top \beta + m_0^\top M_0 m_0 + \beta^\top X^\top V^{-1} X \beta - \beta^\top X^\top V^{-1} Y - Y^\top V^{-1} X \beta + Y^\top V^{-1} Y $$
+
+We can group these into quadratic terms (involving $\beta$ twice), linear cross-terms (involving $\beta$ once), and constant terms (independent of $\beta$):
+
+**1. Grouping Quadratic Terms:**
+$$ \beta^\top (M_0^{-1} + X^\top V^{-1} X) \beta $$
+
+**2. Grouping Linear Cross-Terms:**
+$$ - \beta^\top (m_0 + X^\top V^{-1} Y) - (m_0^\top + Y^\top V^{-1} X) \beta $$
+
+To simplify this, we define our sequential row-scale precision matrix $M_n^{-1}$ and location anchor $m_n$ as follows:
+
+$$ M_n^{-1} = M_0^{-1} + X^\top V^{-1} X $$
+
+$$ m_n = m_0 + X^\top V^{-1} Y $$
+
+Substituting these definitions back into our grouped terms collapses the expression significantly:
+
+$$ \beta^\top M_n^{-1} \beta - \beta^\top m_n - m_n^\top \beta + \Psi_0 + m_0^\top M_0 m_0 + Y^\top V^{-1} Y $$
+
+**3. Completing the Matrix Square:**
+To factor the $\beta$ terms into a perfect matrix square, we need it to match the expanded form of $(\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n)$, which evaluates to:
+
+$$ \beta^\top M_n^{-1} \beta - \beta^\top M_n^{-1} (M_n m_n) - (M_n m_n)^\top M_n^{-1} \beta + (M_n m_n)^\top M_n^{-1} (M_n m_n) $$
+
+$$ = \beta^\top M_n^{-1} \beta - \beta^\top m_n - m_n^\top \beta + m_n^\top M_n m_n $$
+
+Notice that our working expression has the first three terms, but is missing the $+ m_n^\top M_n m_n$ block. By adding and subtracting $m_n^\top M_n m_n$, we complete the square without altering the equation's underlying value:
+
+$$ (\beta^\top M_n^{-1} \beta - \beta^\top m_n - m_n^\top \beta + m_n^\top M_n m_n) - m_n^\top M_n m_n + \Psi_0 + m_0^\top M_0 m_0 + Y^\top V^{-1} Y $$
+
+This leaves us with the completed square for $\beta$ alongside a leftover scale component independent of $\beta$:
+
+$$ (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n) + \Psi_0 + Y^\top V^{-1} Y + m_0^\top M_0 m_0 - m_n^\top M_n m_n $$
+
+## Final Updating Equations
+The algebraic expansion demonstrates that the joint posterior parameters are enclosed within the original conjugate distribution family, denoted as $\text{MNIW}(M_n m_n, M_n, \Psi_n, \nu_n)$:
+
+$$\beta, \Sigma \mid D \sim \text{MNIW}(M_n m_n, M_n, \Psi_n, \nu_n)$$
+
+The exact updates are governed by the following formulas:
+
+$$M_n = \left( M_0^{-1} + X^\top V^{-1} X \right)^{-1}$$
+
+$$m_n = m_0 + X^\top V^{-1} Y$$
+
+$$\nu_n = \nu_0 + n$$
+
+$$\Psi_n = \Psi_0 + Y^\top V^{-1} Y + m_0^\top M_0 m_0 - m_n^\top M_n m_n$$
+
+---
+
+## Factorization into Marginal and Conditional Distributions
+
+With the matrix square completed, we can rewrite the joint posterior density by substituting our updated parameters and distributing the trace operator. By splitting the exponential terms and grouping the powers of the determinant $|\Sigma|$, the joint posterior neatly factorizes into two distinct and recognizable density kernels:
+
+$$p(\beta, \Sigma \mid D) \propto |\Sigma|^{-\frac{\nu_n + p + q + 1}{2}} \exp\left(-\frac{1}{2}\text{tr}\left[\Sigma^{-1}\left(\Psi_n + (\beta - M_n m_n)^\top M_n^{-1}(\beta - M_n m_n)\right)\right]\right)$$
+
+We can separate the components depending solely on $\Sigma$ from those containing both $\beta$ and $\Sigma$:
+
+$$p(\beta, \Sigma \mid D) \propto \frac{\exp\left(-\frac{1}{2}\text{tr}\left[\Psi_n \Sigma^{-1}\right]\right)}{|\Sigma|^{\frac{\nu_n + q + 1}{2}}} \times \frac{\exp\left(-\frac{1}{2}\text{tr}\left[(\beta - M_n m_n)^\top M_n^{-1}(\beta - M_n m_n)\Sigma^{-1}\right]\right)}{|\Sigma|^{\frac{p}{2}}}$$
+
+Recognizing the functional forms of these two kernels reveals that they correspond exactly (up to proportionality constants) to an Inverse-Wishart distribution and a Matrix-Normal distribution:
+
+$$p(\beta, \Sigma \mid D) \propto \underbrace{\text{IW}(\Sigma \mid \Psi_n, \nu_n)}_{p(\Sigma \mid D)} \times \underbrace{\text{MN}_{p,q}(\beta \mid M_n m_n, M_n, \Sigma)}_{p(\beta \mid \Sigma, D)}$$
+
+This factorization is the mathematical engine that drives the composition sampling strategy. Because the joint density explicitly equals $p(\Sigma \mid D) \times p(\beta \mid \Sigma, D)$, we can obtain exact joint posterior draws by first simulating $\Sigma$ from its marginal Inverse-Wishart distribution, and subsequently drawing $\beta$ from its Matrix-Normal distribution conditional on that specific realization of $\Sigma$.
+
+---
+
+# Joint Posterior Sampling Methods
+
+Sampling from the joint Matrix Normal-Inverse Wishart posterior distribution $\text{MNIW}(M_n m_n, M_n, \Psi_n, \nu_n)$ is performed via composition sampling. Because the joint density factorizes into the product of an explicit marginal distribution and a conditional distribution, $p(\beta, \Sigma \mid D) = p(\Sigma \mid D) \cdot p(\beta \mid \Sigma, D)$, we draw $\Sigma$ first and then draw $\beta$ conditionally on that realization.
+
+## Method 1: The Direct Cholesky Approach
+For a standalone dataset where the number of predictors $p$ is small, the row-scale matrix $M_n$ is a manageable $p \times p$ matrix. Evaluating this matrix directly offers the most straightforward and mathematically efficient sampling path:
+
+1. Sample the Column Covariance: Draw a matrix realization $\Sigma$ from its marginal posterior distribution:
+   $$\Sigma \sim \text{IW}(\Psi_n, \nu_n)$$
+2. Compute the Cholesky Factors: Calculate the lower triangular Cholesky decompositions for both scale matrices, yielding $L_M = \text{chol}(M_n)$ and $L_\Sigma = \text{chol}(\Sigma)$.
+3. Construct the Coefficients: Draw a $p \times q$ matrix $Z$ containing independent and identically distributed standard normal random variables, and map them to the target distribution:
+   $$\beta = M_n m_n + L_M Z L_\Sigma^\top$$
+
+## Method 2: The Precision-System Approach
+An alternative approach bypasses the explicit computation of the row-scale variance matrix $M_n$ by solving a structured linear system. This framework can be useful when you prefer to work entirely with the precision matrix variables:
+
+1. Sample the Column Covariance: Draw a matrix realization $\Sigma \sim \text{IW}(\Psi_n, \nu_n)$.
+2. Generate Auxiliary Buffers: Draw two independent matrix variables from their respective prior and likelihood-scale states:
+   $$Z \sim \text{MN}_{p,q}(M_0 m_0, M_0, \Sigma)$$
+   $$Y_{\text{rep}} \sim \text{MN}_{n,q}(Y, V, \Sigma)$$
+3. Decompose the Precision Matrix: Define the positive-definite precision matrix as $A = M_0^{-1} + X^\top V^{-1} X$. Compute its lower triangular Cholesky factor $L_A$ such that:
+   $$A = L_A L_A^\top$$
+4. Compute the Right-Hand Side Buffer: Calculate the combined data and prior matrix buffer $B$:
+   $$B = M_0^{-1} Z + X^\top V^{-1} Y_{\text{rep}}$$
+5. Solve via Triangular Substitutions: Obtain the coefficient matrix $\beta$ using stable triangular solvers in a two-step sequence:
+   * Forward Substitution: Solve the lower triangular system $L_A W = B$ for the intermediate matrix $W$.
+   * Back Substitution: Solve the upper triangular system $L_A^\top \beta = W$ for the target coefficient matrix $\beta$.
+
+Matching the first two moments confirms that the resulting parameter matrix exactly satisfies the conditional distribution $\beta \sim \text{MN}_{p,q}(M_n m_n, M_n, \Sigma)$.
+
+---
+
+# R Implementation and Data Analysis
+
+The theoretical framework described above is executed using the optimized script located in `src/mniwExactSampler.r`. The following R snippets ingest the data, set the prior distribution, and execute the exact sampling routines while strictly avoiding computationally heavy matrix inversions.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+
+# Source the optimized MNIW sampler functions
+source("../src/mniwExactSampler.r")
+```
+
+## Data Ingestion
+
+```{r load_data}
+# Read the continuous numerical data into standard matrices
+Y <- as.matrix(read.table("../data/Y.txt", header = FALSE))
+X_raw <- as.matrix(read.table("../data/X.txt", header = FALSE))
+
+# Prepend an intercept to the design matrix
+n <- nrow(X_raw)
+X <- cbind(1, X_raw)
+
+# Extract dimensions for prior specification
+k <- ncol(X)
+p <- ncol(Y)
+```
+
+## Prior Specification
+
+```{r specify_priors}
+# B0: Prior mean for regression coefficients (k x p)
+B0 <- matrix(0, nrow = k, ncol = p)
+
+# Lambda0: Prior precision matrix for rows (k x k)
+Lambda0 <- diag(1, k)
+
+# nu0: Prior degrees of freedom (must be > p - 1)
+nu0 <- p + 2
+
+# S0: Prior scale matrix (p x p)
+S0 <- diag(1, p)
+```
+
+## Posterior Sampling
+
+```{r execute_model}
+# Execute the Bayesian Multivariate Linear Regression
+# We utilize Method 2 (Precision Parameterized) to efficiently sample
+set.seed(42)
+n_samples <- 1000
+
+model_results <- bayes_mvr(
+  Y = Y, 
+  X = X, 
+  B0 = B0, 
+  Lambda0 = Lambda0, 
+  nu0 = nu0, 
+  S0 = S0, 
+  method = 2, 
+  n_samples = n_samples
+)
+
+# Extract samples and coerce to 3D arrays if necessary
+beta_samples <- model_results$samples$B
+if(is.list(beta_samples)) beta_samples <- simplify2array(beta_samples)
+
+sigma_samples <- model_results$samples$Sigma
+if(is.list(sigma_samples)) sigma_samples <- simplify2array(sigma_samples)
+```
+
+---
+
+# Posterior Summaries
+
+To present our findings clearly, we extract point estimates and 95% credible intervals (alongside the median) for each element of the regression coefficient matrix $\beta$ and the column-covariance matrix $\Sigma$.
+
+```{r summarize_posterior, echo=FALSE, results='asis'}
+# Helper function to compute summaries for a 3D array of posterior samples
+generate_summary_table <- function(samples_array, param_prefix) {
+  n_rows <- dim(samples_array)[1]
+  n_cols <- dim(samples_array)[2]
+  
+  # Create a grid of matrix indices to avoid looping
+  grid <- expand.grid(Row = 1:n_rows, Col = 1:n_cols)
+  
+  # Process summaries efficiently over the index grid
+  summary_list <- lapply(1:nrow(grid), function(idx) {
+    i <- grid$Row[idx]
+    j <- grid$Col[idx]
+    samps <- samples_array[i, j, ]
+    
+    data.frame(
+      Parameter = paste0(param_prefix, "[", i, ",", j, "]"),
+      Mean = round(mean(samps), 4),
+      SD = round(sd(samps), 4),
+      `2.5%` = round(quantile(samps, 0.025), 4),
+      `50%` = round(median(samps), 4),
+      `97.5%` = round(quantile(samps, 0.975), 4),
+      check.names = FALSE,
+      row.names = NULL
+    )
+  })
+  
+  df_final <- do.call(rbind, summary_list)
+  # Explicitly clear row names to prevent artifact columns in markdown
+  rownames(df_final) <- NULL
+  return(df_final)
+}
+
+# Generate dataframes
+df_beta <- generate_summary_table(beta_samples, "Beta")
+df_sigma <- generate_summary_table(sigma_samples, "Sigma")
+
+# Print beautifully formatted tables using knitr::kable
+cat("## Posterior Summary for $\\beta$\n\n")
+print(kable(df_beta, format = "markdown", align = "c", row.names = FALSE))
+
+cat("\n## Posterior Summary for $\\Sigma$\n\n")
+print(kable(df_sigma, format = "markdown", align = "c", row.names = FALSE))
+```
+
+---
+
+# Comparison with Established R Packages
+
+To validate our exact, inversion-free linear algebra implementation, we benchmark our posterior draws against established packages in the R ecosystem. We begin with `bayesm`, a standard package for Bayesian microeconometrics.
+
+## Comparison with `bayesm`
+
+The `bayesm::rmultireg` function executes an exact analytical draw from the Matrix-Normal-Inverse-Wishart posterior using composition sampling. We map our prior specifications directly into `rmultireg` to compare the resulting parameter estimates.
+
+```{r bayesm_benchmark, message=FALSE, warning=FALSE, results='asis'}
+# Load the bayesm package
+library(bayesm)
+
+# 1. Execute the model
+# rmultireg takes arguments directly and draws 1 sample per call, 
+# Using lapply instead of replicate/sapply to avoid hidden loops
+set.seed(42)
+bayesm_draws <- lapply(1:n_samples, function(x) {
+  rmultireg(Y = Y, X = X, Bbar = B0, A = Lambda0, nu = nu0, V = S0)
+})
+
+# 2. Extract and format the samples into 3D arrays to match our earlier structure
+beta_bayesm_list <- lapply(bayesm_draws, function(x) x$B)
+sigma_bayesm_list <- lapply(bayesm_draws, function(x) x$Sigma)
+
+beta_bayesm_array <- simplify2array(beta_bayesm_list)
+sigma_bayesm_array <- simplify2array(sigma_bayesm_list)
+
+# 3. Generate summaries using the helper function defined in Section 6
+df_beta_bayesm <- generate_summary_table(beta_bayesm_array, "Beta (bayesm)")
+df_sigma_bayesm <- generate_summary_table(sigma_bayesm_array, "Sigma (bayesm)")
+
+# 4. Print the tables for comparison
+cat("### `bayesm` Posterior Summary for $\\beta$\n\n")
+print(kable(df_beta_bayesm, format = "markdown", align = "c", row.names = FALSE))
+
+cat("\n### `bayesm` Posterior Summary for $\\Sigma$\n\n")
+print(kable(df_sigma_bayesm, format = "markdown", align = "c", row.names = FALSE))
+```
+
+### Graphical Comparison: QQ-Plots
+
+To emphatically visualize the agreement between our exact sampler and `bayesm`, we generate quantile-quantile (QQ) plots for every individual parameter in the $\beta$ and $\Sigma$ matrices. The red diagonal line represents perfect distributional agreement.
+
+```{r qqplots_bayesm, fig.width=10, fig.height=8, echo=FALSE, message=FALSE, warning=FALSE}
+# Determine dimensions for plotting
+k_dim <- dim(beta_samples)[1]
+p_dim <- dim(beta_samples)[2]
+
+# --- QQ-Plots for Beta ---
+# Set up plotting area dynamically based on matrix dimensions
+par(mfrow = c(k_dim, p_dim), mar = c(4, 4, 2, 1))
+grid_beta <- expand.grid(Row = 1:k_dim, Col = 1:p_dim)
+
+invisible(lapply(1:nrow(grid_beta), function(idx) {
+  i <- grid_beta$Row[idx]
+  j <- grid_beta$Col[idx]
+  qqplot(beta_samples[i, j, ], beta_bayesm_array[i, j, ],
+         main = paste0("QQ-Plot: Beta[", i, ",", j, "]"),
+         xlab = "Custom Sampler Quantiles", 
+         ylab = "bayesm Quantiles",
+         pch = 16, col = rgb(0.2, 0.4, 0.6, 0.5))
+  abline(0, 1, col = "red", lwd = 2)
+}))
+
+# --- QQ-Plots for Sigma ---
+# Set up plotting area for the p x p covariance matrix
+par(mfrow = c(p_dim, p_dim), mar = c(4, 4, 2, 1))
+grid_sigma <- expand.grid(Row = 1:p_dim, Col = 1:p_dim)
+
+invisible(lapply(1:nrow(grid_sigma), function(idx) {
+  i <- grid_sigma$Row[idx]
+  j <- grid_sigma$Col[idx]
+  qqplot(sigma_samples[i, j, ], sigma_bayesm_array[i, j, ],
+         main = paste0("QQ-Plot: Sigma[", i, ",", j, "]"),
+         xlab = "Custom Sampler Quantiles", 
+         ylab = "bayesm Quantiles",
+         pch = 16, col = rgb(0.2, 0.4, 0.6, 0.5))
+  abline(0, 1, col = "red", lwd = 2)
+}))
+
+# Reset graphics parameters
+par(mfrow = c(1, 1))
+```
+
+## Comparison with `mniw`
+
+The `mniw` package is purpose-built for sampling from the Matrix-Normal-Inverse-Wishart distribution. Unlike `bayesm`, which wraps the posterior update inside the regression function, `mniw` acts as a direct distribution sampler. This requires us to explicitly compute our analytical posterior parameters and feed them to the `rmniw` function, providing a perfect 1-to-1 baseline for our algebraic derivations.
+
+```{r mniw_benchmark, message=FALSE, warning=FALSE, results='asis'}
+# Load the mniw package
+library(mniw)
+
+# 1. Compute posterior parameters analytically
+# Utilizing highly efficient, numerically stable linear algebra 
+# (avoiding solve() and t() via Cholesky decomposition and cross products)
+
+# Evaluate precision matrix: Mn_inv = Lambda0 + X'X
+Mn_inv <- Lambda0 + crossprod(X)
+
+# Cholesky decomposition of the precision matrix
+U_inv <- chol(Mn_inv) 
+
+# Posterior linear anchor: mn = Lambda0 %*% B0 + X'Y
+mn <- Lambda0 %*% B0 + crossprod(X, Y)
+
+# Solve for posterior mean: post_mean = (Mn_inv)^{-1} mn
+# We solve the system t(U_inv) %*% U_inv %*% post_mean = mn using stable triangular solvers
+y_tmp <- backsolve(U_inv, mn, transpose = TRUE)
+post_mean <- backsolve(U_inv, y_tmp)
+
+# Solve for posterior scale matrix: Mn = (Mn_inv)^{-1} = U_inv^{-1} * (U_inv')^{-1}
+#U_inv_inv <- backsolve(U_inv, diag(nrow(U_inv)))
+#Mn <- tcrossprod(U_inv_inv)
+
+# Posterior degrees of freedom
+nu_n <- nu0 + nrow(X)
+
+# Posterior scale matrix for covariance: Psi_n
+# Expanded efficiently using crossprod to avoid standard transpositions
+Psi_n <- S0 + crossprod(Y) + crossprod(B0, Lambda0 %*% B0) - crossprod(mn, post_mean)
+
+# 2. Execute the mniw sampler
+set.seed(42)
+# rmniw draws from the MNIW distribution and returns a list containing:
+# X (the Matrix-Normal draws) and V (the Inverse-Wishart draws)
+# NOTE: In mniw, the row-covariance matrix is passed as Sigma, not Omega
+mniw_draws <- rmniw(n = n_samples, Lambda = post_mean, Omega = Mn_inv, Psi = Psi_n, nu = nu_n)
+
+# 3. Extract and format the samples
+# mniw conveniently outputs 3D arrays natively (p x q x n)
+beta_mniw_array <- mniw_draws$X
+sigma_mniw_array <- mniw_draws$V  # FIXED: mniw returns covariance as V, not Sigma
+
+# 4. Generate summaries using the helper function defined in Section 6
+df_beta_mniw <- generate_summary_table(beta_mniw_array, "Beta (mniw)")
+df_sigma_mniw <- generate_summary_table(sigma_mniw_array, "Sigma (mniw)")
+
+# 5. Print the tables for comparison
+cat("### `mniw` Posterior Summary for $\\beta$\n\n")
+print(kable(df_beta_mniw, format = "markdown", align = "c", row.names = FALSE))
+
+cat("\n### `mniw` Posterior Summary for $\\Sigma$\n\n")
+print(kable(df_sigma_mniw, format = "markdown", align = "c", row.names = FALSE))
+```
+
+### Graphical Comparison: QQ-Plots
+
+Just as we did with `bayesm`, we generate quantile-quantile (QQ) plots to compare our custom exact sampler against the `mniw` package natively. The red diagonal line represents perfect distributional agreement between the two sampling routines.
+
+```{r qqplots_mniw, fig.width=10, fig.height=8, echo=FALSE, message=FALSE, warning=FALSE}
+# --- QQ-Plots for Beta ---
+# Set up plotting area dynamically based on matrix dimensions
+par(mfrow = c(k_dim, p_dim), mar = c(4, 4, 2, 1))
+
+invisible(lapply(1:nrow(grid_beta), function(idx) {
+  i <- grid_beta$Row[idx]
+  j <- grid_beta$Col[idx]
+  qqplot(beta_samples[i, j, ], beta_mniw_array[i, j, ],
+         main = paste0("QQ-Plot: Beta[", i, ",", j, "]"),
+         xlab = "Custom Sampler Quantiles", 
+         ylab = "mniw Quantiles",
+         pch = 16, col = rgb(0.2, 0.6, 0.4, 0.5))
+  abline(0, 1, col = "red", lwd = 2)
+}))
+
+# --- QQ-Plots for Sigma ---
+# Set up plotting area for the p x p covariance matrix
+par(mfrow = c(p_dim, p_dim), mar = c(4, 4, 2, 1))
+
+invisible(lapply(1:nrow(grid_sigma), function(idx) {
+  i <- grid_sigma$Row[idx]
+  j <- grid_sigma$Col[idx]
+  qqplot(sigma_samples[i, j, ], sigma_mniw_array[i, j, ],
+         main = paste0("QQ-Plot: Sigma[", i, ",", j, "]"),
+         xlab = "Custom Sampler Quantiles", 
+         ylab = "mniw Quantiles",
+         pch = 16, col = rgb(0.2, 0.6, 0.4, 0.5))
+  abline(0, 1, col = "red", lwd = 2)
+}))
+
+# Reset graphics parameters
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Computational Performance Benchmarking
+
+While Section 7 established that our custom algorithms generate the exact same posterior distributions as established packages, we designed them specifically for computational efficiency. By relying entirely on Cholesky decompositions (`chol`), cross-products (`crossprod`, `tcrossprod`), and triangular solvers (`backsolve`), we bypassed the highly taxing operations of standard matrix inversion (`solve`) and transposition (`t`).
+
+To quantify the performance gains, we will use the `microbenchmark` package to run a rigorous timing comparison across four methods: our custom Method 1 (Direct Cholesky), our custom Method 2 (Precision-System), `bayesm`, and `mniw`.
+
+```{r benchmark_execution, message=FALSE, warning=FALSE}
+# Load the microbenchmark package for precise timing
+if (!requireNamespace("microbenchmark", quietly = TRUE)) {
+  install.packages("microbenchmark")
+}
+library(microbenchmark)
+
+# Define a smaller sample size for the benchmark to run quickly
+bench_samples <- 500
+
+# Run the benchmark
+set.seed(42)
+timing_results <- microbenchmark(
+  "Custom (Method 1)" = {
+    bayes_mvr(Y = Y, X = X, B0 = B0, Lambda0 = Lambda0, 
+              nu0 = nu0, S0 = S0, method = 1, n_samples = bench_samples)
+  },
+  
+  "Custom (Method 2)" = {
+    bayes_mvr(Y = Y, X = X, B0 = B0, Lambda0 = Lambda0, 
+              nu0 = nu0, S0 = S0, method = 2, n_samples = bench_samples)
+  },
+  
+  "bayesm::rmultireg" = {
+    lapply(1:bench_samples, function(x) {
+      rmultireg(Y = Y, X = X, Bbar = B0, A = Lambda0, nu = nu0, V = S0)
+    })
+  },
+  
+  "mniw::rmniw" = {
+    # Include the analytical parameter preparation time to be fair
+    Mn_inv <- Lambda0 + crossprod(X)
+    U_inv <- chol(Mn_inv) 
+    mn <- Lambda0 %*% B0 + crossprod(X, Y)
+    
+    y_tmp <- backsolve(U_inv, mn, transpose = TRUE)
+    post_mean <- backsolve(U_inv, y_tmp)
+    
+ #   U_inv_inv <- backsolve(U_inv, diag(nrow(U_inv)))
+ #   Mn <- tcrossprod(U_inv_inv)
+    nu_n <- nu0 + nrow(X)
+    Psi_n <- S0 + crossprod(Y) + crossprod(B0, Lambda0 %*% B0) - crossprod(mn, post_mean)
+    
+    rmniw(n = bench_samples, Lambda = post_mean, Omega = Mn_inv, Psi = Psi_n, nu = nu_n)
+  },
+  times = 50 # Run each method 50 times for a stable average
+)
+```
+
+## Benchmark Results
+
+```{r benchmark_plot, echo=FALSE, fig.width=9, fig.height=6}
+# Print the textual summary table
+print(timing_results)
+
+# Generate a traditional base R boxplot of the computational times
+boxplot(
+  timing_results, 
+  unit = "ms", 
+  main = "Execution Time Comparison",
+  ylab = "Time (milliseconds)",
+  col = c("lightblue", "lightgreen", "lightpink", "wheat"),
+  las = 1,       # Keep y-axis labels horizontal
+  cex.axis = 0.9 # Slightly scale down axis text to fit labels
+)
+```
+
+## Conclusion
+
+Our optimized custom samplers typically outperform `bayesm` significantly. This is largely because `bayesm::rmultireg` redraws parameters and executes matrix operations redundantly for every single sample in the `lapply` loop, whereas our methods vectorize the parameter draws. 
+
+Between Method 1 and Method 2, Method 1 (Direct Cholesky) often shows a slight edge for standard datasets because it minimizes overhead, though Method 2 remains highly stable for precision-parameterized workflows. Compared to `mniw` (which is written heavily in C++ for maximum speed), our pure-R custom samplers remain highly competitive. This demonstrates that by leveraging optimized BLAS/LAPACK subroutines natively available in R (`crossprod` and `backsolve`), we can achieve near-compiled speeds without sacrificing the transparency of pure R code.
+
+# Posterior Predictive Inference
+
+Once we have obtained the posterior distribution for our parameters $\beta$ and $\Sigma$, a common objective is to predict a new response matrix $\tilde{Y}$ of dimension $m \times q$ given a new design matrix of predictors $\tilde{X}$ of dimension $m \times p$.
+
+Because the new data $\tilde{Y}$ is conditionally independent of the observed data $Y$ given the parameters, the joint posterior distribution of the parameters and the new predictions simplifies beautifully:
+$$p(\beta, \Sigma, \tilde{Y} \mid Y) \propto p(\beta, \Sigma \mid Y) \times p(\tilde{Y} \mid \beta, \Sigma, Y)$$
+
+We can break this down into two familiar components:
+
+*   **The Posterior:** $p(\beta, \Sigma \mid Y) = MNIW(\beta, \Sigma \mid Mm, M, \nu, \Psi)$
+*   **The Likelihood:** $p(\tilde{Y} \mid \beta, \Sigma) = MN(\tilde{Y} \mid \tilde{X}\beta, I_m, \Sigma)$
+
+## Exact Posterior Predictive Sampling
+
+Rather than dealing with complex matrix-variate calculus to find the marginal predictive distribution $p(\tilde{Y} \mid Y)$ directly, we can draw $\tilde{Y}$ from the likelihood for every posterior sample. This compositional approach is highly efficient, straightforward to implement in R, and intuitively mirrors the data-generating process.
+
+Here is the exact algorithm for generating $N$ samples from the posterior predictive distribution:
+
+**Algorithm: Exact Posterior Predictive Sampling**
+
+1.  **For** $i$ in $1, \dots, N$:
+    *   **Step A:** Draw the covariance matrix from the Inverse-Wishart posterior:
+        $$\Sigma_{(i)} \sim IW(\nu, \Psi)$$
+    *   **Step B:** Draw the coefficient matrix conditionally on $\Sigma_{(i)}$ from the Matrix-Normal posterior:
+        $$\beta_{(i)} \sim MN(Mm, M, \Sigma_{(i)})$$
+    *   **Step C:** Draw the new response conditionally on both parameters from the Matrix-Normal likelihood:
+        $$\tilde{Y}_{(i)} \sim MN(\tilde{X}\beta_{(i)}, I_m, \Sigma_{(i)})$$
+2.  **Return** the collection of simulated predictive matrices $(\tilde{Y}_{(i)})_{i=1,\dots,N}$.
+
+By repeating this process over many draws, the resulting collection of $\tilde{Y}$ samples empirically forms our posterior predictive distribution.
+
+---
+
+## A Note on the Closed-Form Matrix-T Distribution
+
+It is worth noting that the exact marginal predictive density $p(\tilde{Y} \mid Y)$ actually takes the form of a closed-form Matrix-T (or hyper-T) distribution. While integrating out $\beta$ and $\Sigma$ manually can be challenging for broader audiences, there is an elegant "conditional trick" (detailed in Section 10.2 of recent foundational MNIW literature) that neatly bypasses the heavy calculus to yield this density.
+
+However, for generating predictions in practice, the sampling algorithm outlined above is entirely sufficient and often preferred. We will defer the formal derivation of the Matrix-T densities—for both $\beta$ and $\tilde{Y}$—to a later Appendix, or a future tutorial covering WAIC derivations for MNIW models, where evaluating these exact densities becomes mathematically necessary.
+
+---
+
+# Posterior Predictive Implementation
+
+In this section, we transition from theory to practice by simulating posterior predictive distributions for a set of unobserved data. We will randomly extract a subset of $m = 20$ rows from our original raw design matrix to act as our new predictor matrix $\tilde{X}$.
+
+Using the parameter draws arrays (`beta_samples` and `sigma_samples`) generated in Section 5, we will draw new responses $\tilde{Y}$ using both our custom BLAS-optimized algorithm and the `mniw` package's native `rMNorm` function.
+
+## Generating the New Predictor Matrix
+
+First, we sample the rows and construct the predictive design matrix $\tilde{X}$, ensuring we prepend the intercept column exactly as we did with the training data.
+
+```{r prep_predictive_data}
+# Set a seed for reproducible row sampling
+set.seed(8675309)
+
+# Define the number of new predictions to generate
+m <- 20
+
+# Randomly sample row indices from the raw predictor matrix
+sample_indices <- sample(1:nrow(X_raw), m)
+
+# Extract the corresponding rows to form the new raw predictors
+X_raw_tilde <- X_raw[sample_indices, , drop = FALSE]
+
+# Prepend the intercept to match the trained model structure
+X_tilde <- cbind(1, X_raw_tilde)
+```
+
+## Custom Exact Predictive Sampler
+
+To draw $\tilde{Y}_{(i)}$ conditionally on $\beta_{(i)}$ and $\Sigma_{(i)}$, we map standard normal matrix draws to our target Matrix-Normal distribution. The mathematical transformation is $\tilde{Y} = \tilde{X}\beta + L_m Z L_\Sigma^\top$.
+
+Because our row-covariance matrix $U$ is the identity matrix $I_m$, its Cholesky factor $L_m$ is also $I_m$, simplifying the scale operation. Furthermore, R's `chol()` returns the upper-triangular factor $U_\Sigma$. Standard matrix multiplication of $Z \times U_\Sigma$ implicitly mirrors the exact operation $Z L_\Sigma^\top$ without ever needing to invoke a manual transposition `t()`.
+
+```{r custom_predictive_sampler}
+# Ensure the number of predictive samples matches our parameter draws
+N_draws <- dim(beta_samples)[3]
+q_cols <- dim(beta_samples)[2]
+
+set.seed(123)
+# We use lapply to vectorize the sampling over all posterior draws,
+# completely avoiding explicit for-loops.
+Y_tilde_custom_list <- lapply(1:N_draws, function(i) {
+  # Extract the i-th posterior parameter realizations
+  B_i <- beta_samples[, , i]
+  Sigma_i <- sigma_samples[, , i]
+
+  # Compute the predicted mean location matrix
+  M_i <- X_tilde %*% B_i
+
+  # Draw the standard normal anchor matrix Z
+  Z <- matrix(rnorm(m * q_cols), nrow = m, ncol = q_cols)
+
+  # Calculate the upper Cholesky factor of the column covariance
+  U_Sigma <- chol(Sigma_i)
+
+  # Map to the Matrix-Normal likelihood and return
+  # Z %*% U_Sigma mathematically equals Z %*% t(L_Sigma)
+  Y_draw <- M_i + Z %*% U_Sigma
+  return(Y_draw)
+})
+
+# Collapse the list of matrices into a 3D array (m x q x N_draws)
+Y_tilde_custom <- simplify2array(Y_tilde_custom_list)
+```
+
+## Predictive Sampling with `mniw`
+
+We now replicate this exact process using the `mniw` package's `rMNorm` sampler. We pass the posterior arrays generated by `rmniw` in Section 7.2 to guarantee an isolated, 1-to-1 comparison of the predictive mechanics.
+
+```{r mniw_predictive_sampler, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Vectorize the predictive draws using the mniw parameter arrays
+Y_tilde_mniw_list <- lapply(1:N_draws, function(i) {
+  # Extract the mniw posterior parameter realizations
+  B_i <- beta_mniw_array[, , i]
+  Sigma_i <- sigma_mniw_array[, , i]
+
+  # Compute the predicted mean location matrix
+  M_i <- X_tilde %*% B_i
+
+  # Draw directly from the Matrix-Normal distribution using mniw
+  # rMNorm returns an array, so we use drop() to cast it to a matrix
+  Y_draw <- rMNorm(n = 1, Lambda = M_i, SigmaR = diag(m), SigmaC = Sigma_i)
+  return(drop(Y_draw))
+})
+
+# Collapse into a 3D array
+Y_tilde_mniw <- simplify2array(Y_tilde_mniw_list)
+```
+
+## Predictive Agreement Verification
+
+To confirm that our custom, inversion-free linear algebra maps perfectly to the compiled `mniw` likelihood functions, we will summarize and plot the predictive distribution for the very first element of our new response matrix ($\tilde{Y}_{1,1}$).
+
+```{r verify_predictive, echo=FALSE, fig.width=6, fig.height=5}
+# Extract the predictive distributions for the first row, first column response
+pred_custom_11 <- Y_tilde_custom[1, 1, ]
+pred_mniw_11 <- Y_tilde_mniw[1, 1, ]
+
+# Print quick comparative summary statistics
+cat("**Predictive Summary for Y_tilde[1,1] (Custom Sampler):**\n")
+print(summary(pred_custom_11))
+
+cat("\n**Predictive Summary for Y_tilde[1,1] (`mniw` Sampler):**\n")
+print(summary(pred_mniw_11))
+
+# Generate a QQ-Plot to visually verify distributional alignment
+qqplot(
+  pred_custom_11,
+  pred_mniw_11,
+  main = expression(paste("Posterior Predictive QQ-Plot for ", tilde(Y)[1:1])),
+  xlab = "Custom Sampler Quantiles",
+  ylab = "mniw Quantiles",
+  pch = 16,
+  col = rgb(0.6, 0.2, 0.4, 0.5)
+)
+abline(0, 1, col = "red", lwd = 2)
+```
+
+The matching summary statistics and perfect diagonal alignment in the QQ-plot empirically prove that our matrix arithmetic evaluates the analytical posterior predictive density accurately.
+
+## Posterior Predictive Visual Diagnostics & Coverage
+
+We evaluate model performance on our hold-out predictions using posterior predictive diagnostics, explicitly quantifying empirical coverage for our nominal 95% predictive intervals.
+
+```{r predictive_diagnostics_exact, fig.width=11, fig.height=5.5}
+# Extract (m x N_draws) matrix for primary outcome and hold-out observations
+Y_tilde <- Y_tilde_custom[, 1, ] # Rows = observations, Columns = draws
+Y_true  <- Y[sample_indices, 1]
+
+# 1. Compute posterior predictive metrics
+pred_mean <- rowMeans(Y_tilde)
+PI_lower  <- apply(Y_tilde, 1, quantile, probs = 0.025)
+PI_upper  <- apply(Y_tilde, 1, quantile, probs = 0.975)
+
+# 2. Calculate Empirical Coverage Probability
+covered <- (Y_true >= PI_lower) & (Y_true <= PI_upper)
+coverage_prob <- mean(covered)
+
+# Print explicit summary metric to markdown output
+cat(sprintf("**Empirical 95%% Coverage Probability:** %.2f%% (%d / %d observations covered)\n", 
+            coverage_prob * 100, sum(covered), length(Y_true)))
+
+# Define color schemes for covered vs uncovered observations
+pt_cols  <- ifelse(covered, "black", "firebrick")
+bar_cols <- ifelse(covered, rgb(0.3, 0.6, 0.85, 0.6), rgb(1, 0.4, 0.4, 0.7))
+
+# Set up side-by-side diagnostic layout
+par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3, 1))
+
+# ==============================================================================
+# Plot 1: 95% Posterior Predictive Intervals vs Hold-out Y (Sorted by True Y)
+# ==============================================================================
+sort_idx     <- order(Y_true)
+Y_true_sort  <- Y_true[sort_idx]
+pred_sort    <- pred_mean[sort_idx]
+lower_sort   <- PI_lower[sort_idx]
+upper_sort   <- PI_upper[sort_idx]
+pt_cols_sort <- pt_cols[sort_idx]
+bar_cols_sort<- bar_cols[sort_idx]
+
+y_lims <- range(c(lower_sort, upper_sort, Y_true_sort))
+
+plot(1:length(Y_true), Y_true_sort, type = "n", ylim = y_lims,
+     xlab = "Hold-out Observation Index (Sorted by True Y)", 
+     ylab = "Target Variable Y",
+     main = sprintf("95%% Predictive Intervals (Coverage: %.1f%%)", coverage_prob * 100))
+
+# Draw predictive intervals, means, and true values
+segments(x0 = 1:length(Y_true), y0 = lower_sort, 
+         x1 = 1:length(Y_true), y1 = upper_sort, 
+         col = bar_cols_sort, lwd = 1.5)
+points(1:length(Y_true), pred_sort, pch = 18, col = "mediumblue", cex = 0.9)
+points(1:length(Y_true), Y_true_sort, pch = 16, col = pt_cols_sort, cex = 0.9)
+
+legend("topleft", 
+       legend = c("Actual Y (Covered)", "Actual Y (Uncovered)", "Predictive Mean", "95% Predictive Interval"),
+       col = c("black", "firebrick", "mediumblue", rgb(0.3, 0.6, 0.85)),
+       pch = c(16, 16, 18, NA), lty = c(NA, NA, NA, 1), lwd = c(NA, NA, NA, 2),
+       bty = "o", bg = "white", cex = 0.75)
+
+# ==============================================================================
+# Plot 2: Observed vs. Predicted Y with 95% PIs
+# ==============================================================================
+plot(Y_true, pred_mean, type = "n", ylim = y_lims, xlim = y_lims,
+     xlab = "Observed Hold-out Y", 
+     ylab = "Predicted Y (Posterior Predictive Mean)",
+     main = "Observed vs. Predicted Y with 95% PIs")
+
+abline(0, 1, col = "red", lty = 2, lwd = 2)
+
+segments(x0 = Y_true, y0 = PI_lower, 
+         x1 = Y_true, y1 = PI_upper, 
+         col = bar_cols, lwd = 1.2)
+points(Y_true, pred_mean, pch = 16, col = pt_cols, cex = 0.9)
+
+legend("topleft", 
+       legend = c("1:1 Reference Line", "Covered Observation", "Uncovered Observation"),
+       col = c("red", "black", "firebrick"),
+       lty = c(2, NA, NA), pch = c(NA, 16, 16), lwd = c(2, NA, NA),
+       bty = "o", bg = "white", cex = 0.75)
+
+# Reset graphics layout
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Appendix: Derivation of the Marginal Posterior $p(\beta \mid D)$ {-}
+
+The marginal posterior density $p(\beta \mid D)$ can be derived elegantly without direct matrix-variate integration by utilizing the "conditional trick" for conjugate models. We express the marginal density as the ratio of the joint posterior $p(\beta, \Sigma \mid D)$ to the conditional posterior $p(\Sigma \mid \beta, D)$:
+
+$$p(\beta \mid D) = \frac{p(\beta, \Sigma \mid D)}{p(\Sigma \mid \beta, D)}$$
+
+Under the conjugate Matrix-Normal-Inverse-Wishart (MNIW) framework, the joint posterior is parameterized as $p(\beta, \Sigma \mid D) = \text{MN}_{p,q}(\beta \mid M_n m_n, M_n, \Sigma) \times \text{IW}_q(\Sigma \mid \Psi_n, \nu_n)$. 
+
+Conditioning on a specific $\beta$ and the data $D$, the distribution of $\Sigma$ updates its scale matrix to absorb the regression error, resulting in:
+
+$$p(\Sigma \mid \beta, D) = \text{IW}_q\left(\Sigma \;\Big|\; \Psi_n + (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n), \; \nu_n + p\right)$$
+
+Substituting the full probability density functions into the ratio identity:
+
+$$p(\beta \mid D) = \frac{\left[ (2\pi)^{-pq/2} |M_n|^{-q/2} |\Sigma|^{-p/2} \exp\left(-\frac{1}{2}\text{tr}\left[\Sigma^{-1}(\beta - M_n m_n)^\top M_n^{-1}(\beta - M_n m_n)\right]\right) \right] \cdot \left[ \frac{|\Psi_n|^{\nu_n/2}}{2^{\nu_n q/2} \Gamma_q(\nu_n / 2)} |\Sigma|^{-\frac{\nu_n + q + 1}{2}} \exp\left(-\frac{1}{2}\text{tr}\left[\Sigma^{-1}\Psi_n\right]\right) \right]}{\frac{\left|\Psi_n + (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n)\right|^{(\nu_n + p)/2}}{2^{(\nu_n + p)q/2} \Gamma_q((\nu_n + p)/2)} |\Sigma|^{-\frac{\nu_n + p + q + 1}{2}} \exp\left(-\frac{1}{2}\text{tr}\left[\Sigma^{-1}\left(\Psi_n + (\beta - M_n m_n)^\top M_n^{-1}(\beta - M_n m_n)\right)\right]\right)}$$
+
+Evaluating this ratio, all terms depending on $\Sigma$ (including the trace exponentials and powers of $|\Sigma|$) cancel out completely. Rearranging the remaining normalizing constants yields the exact Matrix Hyper-T density, $\mathcal{MT}_{p, q}(M_n m_n, M_n, \Psi_n, \nu_n)$:
+
+$$p(\beta \mid D) = \frac{\Gamma_q\left(\frac{\nu_n + p}{2}\right)}{\Gamma_q\left(\frac{\nu_n}{2}\right) \pi^{pq/2}} |M_n|^{-q/2} |\Psi_n|^{-p/2} \left| I_q + \Psi_n^{-1} (\beta - M_n m_n)^\top M_n^{-1} (\beta - M_n m_n) \right|^{-\frac{\nu_n + p}{2}}$$
