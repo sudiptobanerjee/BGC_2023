@@ -1,0 +1,329 @@
+---
+title: "Exact Divide and Conquer Inference in Bayesian Multivariate Linear Regression"
+author: "Sudipto Banerjee"
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+*Note:* To generate this HTML file, run `renderExactMvLM.sh` in the terminal from the `src/bigDataRegression/mniw/exactMvLM/run` directory. Alternatively find the source `Rmd` and `R` files in that same folder starting from the `BGC_2023` GitHub home.
+
+```bash
+# Navigate to the directory and run the compilation script
+cd src/bigDataRegression/mniw/exactMvLM/run
+./renderExactMvLM.sh
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+library(mniw)
+source("../src/mniwSamplerDivideAndConquer.r")
+```
+
+# Conjugate Bayesian Multivariate Linear Regression
+
+A conjugate Bayesian multivariate linear model (the MNIW model) is given by:
+
+$$Y \mid \beta, \Sigma, X \sim MN_{n,q}(X\beta, I_n, \Sigma)$$
+$$\beta \mid \Sigma \sim MN_{p,q}(M_0 m_0, M_0, \Sigma)$$
+$$\Sigma \sim IW(\nu_0, \Psi_0)$$
+
+Unknown parameters include the regression coefficient matrix and the covariance matrix, i.e., $\theta = \{\beta, \Sigma\}$.
+
+The likelihood of the data is:
+
+$$p(Y \mid \beta, \Sigma) \propto |\Sigma|^{-n/2} \exp\left\{ -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (Y - X\beta)^{\top} (Y - X\beta) \right] \right\}$$
+
+The joint posterior density is $p(\beta, \Sigma \mid Y) \propto p(\Sigma) \times p(\beta \mid \Sigma) \times p(Y \mid \beta, \Sigma)$.
+
+---
+
+# Deriving the Joint Posterior $p(\beta, \Sigma \mid Y)$
+
+$$\begin{aligned}
+p(\beta, \Sigma \mid Y) &\propto IW(\Sigma \mid \nu_0, \Psi_0) \times MN(\beta \mid M_0 m_0, M_0, \Sigma) \times MN(Y \mid X\beta, I_n, \Sigma) \\
+&\propto |\Sigma|^{-\frac{\nu_0 + q + 1}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left( \Sigma^{-1} \Psi_0 \right) \right\} \\
+&\quad \times |\Sigma|^{-\frac{p}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (\beta - M_0 m_0)^{\top} M_0^{-1} (\beta - M_0 m_0) \right] \right\} \\
+&\quad \times |\Sigma|^{-\frac{n}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (Y - X\beta)^{\top} (Y - X\beta) \right] \right\} \\
+&\propto |\Sigma|^{-\frac{\nu_0 + n + p + q + 1}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left( \Sigma^{-1} \left[ \Psi_0 + Q(\beta, Y) \right] \right) \right\}
+\end{aligned}$$
+
+where the quadratic terms in $\beta$ are combined as:
+
+$$Q(\beta, Y) = (\beta - M_0 m_0)^{\top} M_0^{-1} (\beta - M_0 m_0) + (Y - X\beta)^{\top} (Y - X\beta)$$
+
+---
+
+# Matrix Completion of Square
+
+Expanding and recombining $Q(\beta, Y)$ (noting that $M_0$ is symmetric, so $(M_0 m_0)^\top M_0^{-1} \beta = m_0^\top M_0 M_0^{-1} \beta = m_0^\top \beta$):
+
+$$\begin{aligned}
+Q(\beta, Y) &= (\beta - M_0 m_0)^{\top} M_0^{-1} (\beta - M_0 m_0) + (Y - X\beta)^{\top} (Y - X\beta) \\
+&= \beta^{\top} M_0^{-1} \beta - \beta^{\top} m_0 - m_0^{\top} \beta + m_0^{\top} M_0 m_0 + Y^{\top} Y - Y^{\top} X \beta - \beta^{\top} X^{\top} Y + \beta^{\top} X^{\top} X \beta \\
+&= \beta^{\top} (M_0^{-1} + X^{\top} X) \beta - \beta^{\top} (m_0 + X^{\top} Y) - (m_0^{\top} + Y^{\top} X) \beta + (m_0^{\top} M_0 m_0 + Y^{\top} Y) \\
+&= (\beta - Mm)^{\top} M^{-1} (\beta - Mm) + S^\ast
+\end{aligned}$$
+
+where the updated parameters $M$, $m$, and $S^\ast$ are defined as:
+
+$$M^{-1} = M_0^{-1} + X^{\top} X, \quad m = m_0 + X^{\top} Y, \quad S^\ast = m_0^{\top} M_0 m_0 + Y^{\top} Y - m^{\top} M m$$
+
+---
+
+# Factorizing the Joint Posterior
+
+Substituting the completed square back into the joint posterior yields:
+
+$$p(\beta, \Sigma \mid Y) \propto \left( |\Sigma|^{-\frac{\nu + q + 1}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} \Psi \right] \right\} \right) \times \left( |\Sigma|^{-\frac{p}{2}} \exp\left\{ -\frac{1}{2} \text{tr}\left[ \Sigma^{-1} (\beta - Mm)^{\top} M^{-1} (\beta - Mm) \right] \right\} \right)$$
+
+where:
+
+$$\nu = \nu_0 + n, \quad \Psi = \Psi_0 + S^\ast = \Psi_0 + m_0^{\top} M_0 m_0 + Y^{\top} Y - m^{\top} M m$$
+
+This factorizes into $IW(\Sigma \mid \nu, \Psi) \times MN(\beta \mid Mm, M, \Sigma)$.
+
+---
+
+# Bayesian Regression using Divide & Conquer
+
+Partition data into blocks $\{Y_t, X_t\}$ for $t = 1, 2, \ldots, T$. For sequential block $t$, updating from $t-1$ follows:
+
+$$m_t = m_{t-1} + X_t^{\top} Y_t, \quad M_t^{-1} = M_{t-1}^{-1} + X_t^{\top} X_t, \quad \nu_t = \nu_{t-1} + n_t$$
+$$Q_t = Y_t^{\top} Y_t + m_{t-1}^{\top} M_{t-1} m_{t-1} - m_t^{\top} M_t m_t, \quad \Psi_t = \Psi_{t-1} + Q_t$$
+
+Summing $Q_t$ over $t=1,\ldots,T$ collapses telescopically:
+
+$$\sum_{t=1}^T Q_t = Y^\top Y + m_0^\top M_0 m_0 - m_{\text{full}}^\top M_{\text{full}} m_{\text{full}}$$
+
+This establishes that streaming updates over blocks **EXACTLY** match full-data posterior parameters.
+
+---
+
+# Empirical Analysis: Custom R Sampler (`mniwSamplerDivideAndConquer`)
+
+Loading the dataset files directly from `../data/X.txt` and `../data/Y.txt`, processing them sequentially via `mniwSamplerDivideAndConquer`, and comparing streaming results against full-data batch updates.
+
+```{r execute_divide_conquer}
+# Ingest raw dataset files
+X_raw  <- as.matrix(read.table("../data/X.txt"))
+Y_raw  <- as.matrix(read.table("../data/Y.txt"))
+X_full <- cbind(1, X_raw)
+Y_full <- Y_raw
+
+p_dim <- ncol(X_full)
+q_dim <- ncol(Y_full)
+
+# Prior parameter setup
+m0     <- matrix(0, nrow = p_dim, ncol = q_dim)
+M0_inv <- diag(1, p_dim)
+nu0    <- q_dim + 2
+Psi0   <- diag(1, q_dim)
+
+# Partition data into T = 5 sequential blocks
+T_blocks    <- 5
+block_sizes <- split(seq_len(nrow(X_full)), cut(seq_len(nrow(X_full)), T_blocks, labels = FALSE))
+data_blocks <- lapply(block_sizes, function(idx) {
+  list(X = X_full[idx, ], Y = Y_full[idx, ])
+})
+
+# 1. Sequential Divide & Conquer Sampler (Custom R)
+set.seed(42)
+res_dc <- mniwSamplerDivideAndConquer(data_blocks, m0, M0_inv, nu0, Psi0, n_samples = 2000)
+
+# 2. Full Data Batch Sampler
+full_data_block <- list(list(X = X_full, Y = Y_full))
+set.seed(42)
+res_batch <- mniwSamplerDivideAndConquer(full_data_block, m0, M0_inv, nu0, Psi0, n_samples = 2000)
+```
+
+## Parameter Precision Comparison (Custom Sampler)
+
+```{r compare_parameters_custom}
+diff_m     <- max(abs(res_dc$post_params$m - res_batch$post_params$m))
+diff_M_inv <- max(abs(res_dc$post_params$M_inv - res_batch$post_params$M_inv))
+diff_Psi   <- max(abs(res_dc$post_params$Psi - res_batch$post_params$Psi))
+diff_nu    <- abs(res_dc$post_params$nu - res_batch$post_params$nu)
+
+param_comp <- data.frame(
+  Parameter_Matrix = c("Location Vector (m)", "Precision Matrix (M^{-1})", "Scale Matrix (Psi)", "Degrees of Freedom (nu)"),
+  Max_Absolute_Difference = c(diff_m, diff_M_inv, diff_Psi, diff_nu)
+)
+
+kable(param_comp, digits = 16, caption = "Numerical Equivalence of Posterior Parameters (Custom Sampler)")
+```
+
+## Posterior Parameter Summaries (Custom Sampler)
+
+```{r posterior_summary_custom, echo=FALSE, results='asis'}
+calc_summaries <- function(arr, name) {
+  grid <- expand.grid(Row = 1:dim(arr)[1], Col = 1:dim(arr)[2])
+  res <- lapply(seq_len(nrow(grid)), function(k) {
+    i <- grid$Row[k]; j <- grid$Col[k]
+    vals <- arr[i, j, ]
+    data.frame(
+      Param = paste0(name, "[", i, ",", j, "]"),
+      Mean = mean(vals), SD = sd(vals),
+      `2.5%` = quantile(vals, 0.025), `97.5%` = quantile(vals, 0.975),
+      check.names = FALSE
+    )
+  })
+  do.call(rbind, res)
+}
+
+df_beta_dc  <- calc_summaries(res_dc$samples$Beta, "Beta")
+df_sigma_dc <- calc_summaries(res_dc$samples$Sigma, "Sigma")
+
+cat("### Regression Coefficients (Beta) Summary (Custom Sampler)\n\n")
+print(kable(df_beta_dc, digits = 4, row.names = FALSE))
+
+cat("\n### Covariance Matrix (Sigma) Summary (Custom Sampler)\n\n")
+print(kable(df_sigma_dc, digits = 4, row.names = FALSE))
+```
+
+## Quantile-Quantile (QQ) Validation (Custom Sampler)
+
+### Regression Coefficients ($\beta$) QQ-Plots
+
+```{r qqplot_beta_custom, fig.width=9, fig.height=7, echo=FALSE}
+par(mfrow = c(p_dim, q_dim), mar = c(3, 3, 2, 1))
+grid_beta <- expand.grid(Row = 1:p_dim, Col = 1:q_dim)
+
+invisible(lapply(seq_len(nrow(grid_beta)), function(k) {
+  i <- grid_beta$Row[k]; j <- grid_beta$Col[k]
+  qqplot(res_dc$samples$Beta[i, j, ], res_batch$samples$Beta[i, j, ],
+         main = paste0("Beta[", i, ",", j, "]"),
+         xlab = "D&C Custom Quantiles", ylab = "Batch Custom Quantiles",
+         pch = 16, col = rgb(0.2, 0.4, 0.8, 0.4))
+  abline(0, 1, col = "firebrick", lwd = 2)
+}))
+par(mfrow = c(1, 1))
+```
+
+### Covariance Matrix ($\Sigma$) QQ-Plots
+
+```{r qqplot_sigma_custom, fig.width=8, fig.height=8, echo=FALSE}
+par(mfrow = c(q_dim, q_dim), mar = c(3, 3, 2, 1))
+grid_sigma <- expand.grid(Row = 1:q_dim, Col = 1:q_dim)
+
+invisible(lapply(seq_len(nrow(grid_sigma)), function(k) {
+  i <- grid_sigma$Row[k]; j <- grid_sigma$Col[k]
+  qqplot(res_dc$samples$Sigma[i, j, ], res_batch$samples$Sigma[i, j, ],
+         main = paste0("Sigma[", i, ",", j, "]"),
+         xlab = "D&C Custom Quantiles", ylab = "Batch Custom Quantiles",
+         pch = 16, col = rgb(0.8, 0.4, 0.2, 0.4))
+  abline(0, 1, col = "firebrick", lwd = 2)
+}))
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Empirical Analysis: C++ Accelerated Sampler (`mniwSamplerDivideAndConquer_rmniw`)
+
+Redoing the streaming posterior analysis using `mniwSamplerDivideAndConquer_rmniw`, passing the row precision $\Omega = M^{-1}$ directly to `mniw::rmniw`.
+
+```{r execute_rmniw_sampler}
+# 1. Streaming Divide & Conquer using C++ rmniw
+set.seed(42)
+res_dc_rmniw <- mniwSamplerDivideAndConquer_rmniw(data_blocks, m0, M0_inv, nu0, Psi0, n_samples = 2000)
+
+# 2. Batch Full Data Analysis using C++ rmniw
+set.seed(42)
+res_batch_rmniw <- mniwSamplerDivideAndConquer_rmniw(full_data_block, m0, M0_inv, nu0, Psi0, n_samples = 2000)
+```
+
+## Parameter Precision Comparison (`rmniw` Sampler)
+
+```{r compare_parameters_rmniw}
+diff_m_rmniw     <- max(abs(res_dc_rmniw$post_params$m - res_batch_rmniw$post_params$m))
+diff_M_inv_rmniw <- max(abs(res_dc_rmniw$post_params$M_inv - res_batch_rmniw$post_params$M_inv))
+diff_Psi_rmniw   <- max(abs(res_dc_rmniw$post_params$Psi - res_batch_rmniw$post_params$Psi))
+diff_nu_rmniw    <- abs(res_dc_rmniw$post_params$nu - res_batch_rmniw$post_params$nu)
+
+param_comp_rmniw <- data.frame(
+  Parameter_Matrix = c("Location Vector (m)", "Precision Matrix (M^{-1})", "Scale Matrix (Psi)", "Degrees of Freedom (nu)"),
+  Max_Absolute_Difference = c(diff_m_rmniw, diff_M_inv_rmniw, diff_Psi_rmniw, diff_nu_rmniw)
+)
+
+kable(param_comp_rmniw, digits = 16, caption = "Numerical Equivalence of Posterior Parameters (rmniw)")
+```
+
+## Posterior Parameter Summaries (`rmniw` Sampler)
+
+```{r posterior_summary_rmniw, echo=FALSE, results='asis'}
+df_beta_rmniw  <- calc_summaries(res_dc_rmniw$samples$Beta, "Beta")
+df_sigma_rmniw <- calc_summaries(res_dc_rmniw$samples$Sigma, "Sigma")
+
+cat("### Regression Coefficients (Beta) Summary (rmniw Sampler)\n\n")
+print(kable(df_beta_rmniw, digits = 4, row.names = FALSE))
+
+cat("\n### Covariance Matrix (Sigma) Summary (rmniw Sampler)\n\n")
+print(kable(df_sigma_rmniw, digits = 4, row.names = FALSE))
+```
+
+## Quantile-Quantile (QQ) Validation (`rmniw` Sampler)
+
+### Regression Coefficients ($\beta$) QQ-Plots (`rmniw` D&C vs. Batch)
+
+```{r qqplot_beta_rmniw, fig.width=9, fig.height=7, echo=FALSE}
+par(mfrow = c(p_dim, q_dim), mar = c(3, 3, 2, 1))
+
+invisible(lapply(seq_len(nrow(grid_beta)), function(k) {
+  i <- grid_beta$Row[k]; j <- grid_beta$Col[k]
+  qqplot(res_dc_rmniw$samples$Beta[i, j, ], res_batch_rmniw$samples$Beta[i, j, ],
+         main = paste0("Beta[", i, ",", j, "]"),
+         xlab = "D&C rmniw Quantiles", ylab = "Batch rmniw Quantiles",
+         pch = 16, col = rgb(0.2, 0.4, 0.8, 0.4))
+  abline(0, 1, col = "firebrick", lwd = 2)
+}))
+par(mfrow = c(1, 1))
+```
+
+### Covariance Matrix ($\Sigma$) QQ-Plots (`rmniw` D&C vs. Batch)
+
+```{r qqplot_sigma_rmniw, fig.width=8, fig.height=8, echo=FALSE}
+par(mfrow = c(q_dim, q_dim), mar = c(3, 3, 2, 1))
+
+invisible(lapply(seq_len(nrow(grid_sigma)), function(k) {
+  i <- grid_sigma$Row[k]; j <- grid_sigma$Col[k]
+  qqplot(res_dc_rmniw$samples$Sigma[i, j, ], res_batch_rmniw$samples$Sigma[i, j, ],
+         main = paste0("Sigma[", i, ",", j, "]"),
+         xlab = "D&C rmniw Quantiles", ylab = "Batch rmniw Quantiles",
+         pch = 16, col = rgb(0.8, 0.4, 0.2, 0.4))
+  abline(0, 1, col = "firebrick", lwd = 2)
+}))
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Execution Timing Benchmark
+
+Comparing runtime between custom R composition sampling (`mniwSamplerDivideAndConquer`) and C++ accelerated sampling (`mniwSamplerDivideAndConquer_rmniw`) across 10,000 posterior draws.
+
+```{r timing_comparison}
+n_bench <- 10000
+
+t_custom <- system.time({
+  res_bench_custom <- mniwSamplerDivideAndConquer(data_blocks, m0, M0_inv, nu0, Psi0, n_samples = n_bench)
+})["elapsed"]
+
+t_rmniw <- system.time({
+  res_bench_rmniw <- mniwSamplerDivideAndConquer_rmniw(data_blocks, m0, M0_inv, nu0, Psi0, n_samples = n_bench)
+})["elapsed"]
+
+timing_df <- data.frame(
+  Sampler_Implementation = c("Custom R Sampler (mniwSamplerDivideAndConquer)", 
+                             "C++ Accelerated Sampler (mniwSamplerDivideAndConquer_rmniw)"),
+  Elapsed_Time_Sec = c(as.numeric(t_custom), as.numeric(t_rmniw)),
+  Speedup_Factor   = c(1.0, as.numeric(t_custom / t_rmniw))
+)
+
+kable(timing_df, digits = 4, caption = paste0("Sampling Execution Time Comparison (", n_bench, " Samples)"))
+```
+
+The C++ implementation in `mniw::rmniw` provides substantial execution speedup over pure R loops due to compiled C++ sampling routines and optimized matrix computations.
