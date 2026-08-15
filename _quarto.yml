@@ -1,0 +1,34 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - index.qmd
+    - "chapter*/index.qmd"
+
+website:
+  title: "Hierarchical Modeling and Analysis for Spatial Data"
+  page-navigation: true
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+  sidebar:
+    style: docked
+    contents:
+      - index.qmd
+      - section: "Chapters"
+        contents:
+          - chapter1/index.qmd
+          - chapter2/index.qmd
+          - chapter4/index.qmd
+          - chapter5/index.qmd
+          - chapter6/index.qmd
+          - chapter10/index.qmd
+          - chapter11/index.qmd
+          - chapter12/index.qmd
+          - chapter13/index.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
