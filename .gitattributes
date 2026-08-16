@@ -1,0 +1,5 @@
+# NOTE: Git LFS is NOT usable on this repo -- it's a public fork, and GitHub blocks
+# forks from uploading new LFS objects to their own storage (shared quota with the
+# upstream/root repo). The Harvard-Forest-spNNGP/HARV/*.tif rasters are committed as
+# regular (large) git blobs instead. If repo size becomes a real problem, host them
+# externally (e.g. a GitHub Release asset) rather than retrying LFS here.

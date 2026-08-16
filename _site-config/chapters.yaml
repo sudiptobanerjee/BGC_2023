@@ -1,0 +1,140 @@
+# Chapter -> example manifest for the CI-built site.
+#
+# HOW THIS WORKS:
+# - CI does NOT render any R. It only picks up whichever files already exist at the
+#   `html` (or `asset`) path below and copies them into the website, organized by
+#   chapter.
+# - Your local workflow is unchanged: knit with the existing render*.sh / rmd_exec*
+#   scripts in src/, the .html lands next to the .Rmd exactly as it does today, then
+#   git add / git commit / git push (gitPush.sh) as usual. The next push triggers the
+#   site rebuild automatically.
+# - html/asset paths point at the source location in src/ (or wherever the file
+#   currently only exists), not the old hand-copied Chapter*/ location. Chapter*/
+#   folders on main can be retired once this is live -- the website becomes the
+#   published copy instead.
+#
+# Entries marked "NEEDS REVIEW" were flagged during the migration audit -- see
+# BGC_2023_migration_plan.md for why. Don't delete/merge those without checking with
+# Prof. Banerjee first.
+
+chapters:
+  - number: 1
+    examples:
+      - title: Map Projection
+        html: Map_Projection/Map_Projection.html
+      - title: Geodesics
+        html: src/distances/geodesics.html
+      - title: Minnesota Maps
+        html: src/data_plot/mn_maps.html
+      - title: Data Plot                      # NEEDS REVIEW: Chapter1/data_plot.html
+        html: src/data_plot/data_plot.html     # does not hash-match this current src file (drift)
+
+  - number: 2
+    examples:
+      - title: EDA / Variograms                # NEEDS REVIEW: Chapter2/eda_variograms.html
+        html: src/eda_geostat/eda_variograms.Rmd # has no rendered .html in src at all currently
+                                                  # (only the .Rmd + .r are there) -- advisor needs
+                                                  # to knit and push eda_variograms.html once, then
+                                                  # update this path
+
+  - number: 4
+    examples:
+      - title: Areal Data Code
+        html: src/areal/code_areal.html
+      - title: NC SIDS                          # NEEDS REVIEW: Chapter4/nc_sids.html
+        html: src/areal/nc_sids.html             # does not hash-match this current src file (drift)
+
+  - number: 5
+    examples:
+      - title: Linear Model (MH / HMC / NUTS)
+        html: src/bayesian_linear_regression_hmc/linearmodel_MH_HMC_NUT.html
+      - title: Exact LM via JAGS (nimble)
+        html: src/nimble/test/lm_nimble.html
+      - title: Exact LM via rjags
+        html: src/rjags/test/lm_rjags.html
+      - title: Model Comparisons
+        html: src/bayesianLinearRegressionExact/raw/run/modelComparisons.html
+      - title: Theory Predictions
+        html: src/bayesianLinearRegressionExact/raw/run/theoryPredictions.html
+      - title: Exact LM JAGS Tutorial           # NEEDS REVIEW: drift vs Chapter5 copy
+        html: src/bayesianLinearRegressionExact/rjags/run/lmExactJagsTutorial.html
+      - title: Theory and Raw Sampler           # NEEDS REVIEW: drift vs Chapter5 copy
+        html: src/bayesianLinearRegressionExact/raw/run/theoryAndRaw.html
+      - title: Theory and Raw Sampler (QR)      # NEEDS REVIEW: drift vs Chapter5 copy
+        html: src/bayesianLinearRegressionExact/raw/run/theoryAndRawWithQR.html
+      - title: Bayesian Linear Regression (PDF)  # no R source in repo -- static asset only
+        asset: Chapter5/Bayesian_Linear_Regression.pdf
+
+  - number: 6
+    examples:
+      - title: Colorado Temperature (geostatistical, nimble)
+        html: src/geostat/test/CO-temp.html
+      - title: Areal Modeling (rjags)
+        html: src/rjags/test/arealModeling_rjags.html
+      - title: Areal (nimble)
+        html: src/nimble/test/areal_nimble.html
+      - title: Areal with Missing Data (nimble)
+        html: src/nimble/test/areal_nimble_with_missing.html
+      - title: Geostatistical Full Model (nimble)
+        html: src/geostat/test/geostat_full_nimble.html
+      - title: Geostatistical (nimble)
+        html: src/geostat/test/geostat_nimble.html
+      - title: Linear Model Residual Mapping
+        html: src/linear_model_residual_mapping/lm_residuals_mapping.html
+      - title: Univariate Spatial Regression
+        html: src/geostat/test/univariate_spatial_regression.html
+
+  - number: 10
+    examples:
+      - title: MNIW Exact Multivariate LM
+        html: src/bayesianLinearRegressionExact/mniw/run/mniwExactMvLM.html
+      - title: MNIW Model Comparisons
+        html: src/bayesianLinearRegressionExact/mniw/run/mniwModelComparisons.html
+      - title: MNIW Posterior Predictive Inference
+        html: src/bayesianLinearRegressionExact/mniw/run/mniwPosteriorPredictiveInference.html
+      - title: Multivariate Spatial Regression
+        html: src/geostat/test/multivariate_spatial_regression.html
+      - title: Bayesian Linear Regression, Multivariate (PDF)  # no R source in repo
+        asset: Chapter10/Bayesian_Linear_Regression_Multivariate.pdf
+      - title: Colorado LMC 4a (BUGS)            # no R source; plain code file
+        asset: Chapter10/coloradolmc4a.bug
+      - title: Colorado LMC 4b (BUGS)            # no R source; plain code file
+        asset: Chapter10/coloradolmc4b.bug
+
+  - number: 11
+    examples:
+      - title: GMCAR (BUGS code)
+        asset: src/areal/GMCAR.txt
+
+  - number: 12
+    examples:
+      - title: Colorado-t Model 1 (BUGS)         # NEEDS REVIEW: no R/Rmd source anywhere in repo
+        asset: Chapter12/colorados-t1.bug
+      - title: Colorado-t Model 2 (BUGS)         # NEEDS REVIEW: no R/Rmd source anywhere in repo
+        asset: Chapter12/colorados-t2.bug
+
+  - number: 13
+    examples:
+      - title: Benchmark
+        html: src/bigDataRegression/mniw/exactMvLM/run/benchmark.html
+      - title: Conjugate NNGP Illustration (Harvard Forest)
+        html: src/Harvard-Forest-spNNGP/Harvard-Forest-ConjNNGP.html
+      - title: Exact LM, Divide and Conquer
+        html: src/bigDataRegression/exactLM/run/exactLMDivideAndConquer.html
+      - title: Exact Multivariate LM
+        html: src/bigDataRegression/mniw/exactMvLM/run/exactMvLM.html
+      - title: Exact Multivariate LM, Federated
+        html: src/bigDataRegression/mniw/exactMvLM/run/exactMvLMFederated.html
+      - title: Federated Learning
+        html: src/bigDataRegression/federatedLearning/run/federatedLearning.html
+      - title: Gaussian Predictive Process
+        html: src/geostat/test/gaussian_predictive_process.html
+      - title: Multivariate Gaussian Predictive Process
+        html: src/geostat/test/multivariate_gaussian_predictive_process.html
+      - title: NNGP                              # NEEDS REVIEW: no .Rmd source anywhere in repo
+        asset: Chapter13/nngp.html                # for this file at all; ask Prof. Banerjee where
+                                                    # it was generated from
+      - title: Bayesian Linear Regression, Multivariate (PDF)
+        asset: Chapter13/Bayesian_Linear_Regression_Multivariate.pdf
+      - title: Bayesian Linear Regression, Divide and Conquer (PDF)
+        asset: Chapter13/Bayesian_Linear_Regression_With_Divide_And_Conquer.pdf
